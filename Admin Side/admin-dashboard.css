@@ -33,8 +33,9 @@ body.admin-dashboard {
     background: #fff;
     border-bottom: 1px solid #e2e8f0;
     flex-shrink: 0;
-    position: relative;
-    z-index: 1;
+    position: sticky;
+    top: 0;
+    z-index: 100;
     min-height: 96px;
 }
 
@@ -176,7 +177,6 @@ body.admin-dashboard {
     grid-template-rows: auto 1fr;
     flex: 1;
     min-height: 0;
-    border-top: 3px solid #D4AF37;
 }
 
 /* Sidebar – fixed, non-scrollable */
