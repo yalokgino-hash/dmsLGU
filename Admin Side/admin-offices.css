@@ -1,5 +1,14 @@
 @import url("admin-dashboard.css");
 
+/* Sticky header on Offices page only */
+.admin-page-offices .admin-content-header-row {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: #fff;
+    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
 /* Ensure offices content is visible on white background - override body's white text */
 .admin-content-body .offices-card,
 .admin-content-body .chart-card-wide.offices-card,
