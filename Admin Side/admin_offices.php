@@ -179,7 +179,7 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
     }
     </style>
 </head>
-<body class="admin-dashboard">
+<body class="admin-dashboard admin-page-offices">
     <div class="admin-body">
         <aside class="admin-sidebar">
             <div class="sidebar-header">
