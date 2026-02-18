@@ -204,12 +204,6 @@ body{
     color:#fff;
 }
 
-.top-bar{
-    height:8px;
-    background:#D4AF37;
-    width:100%;
-}
-
 header{
     padding:18px 60px;
     display:flex;
@@ -779,7 +773,6 @@ footer{
 </head>
 <body>
 
-<div class="top-bar"></div>
 <header>
     <div class="logo">
         <img src="img/logo.png" alt="Municipal Logo">
