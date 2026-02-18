@@ -1,8 +1,0 @@
-@import url("../Admin%20Side/admin-dashboard.css");
-
-.staff-cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 24px;
-    margin-top: 0;
-}
