@@ -79,7 +79,7 @@ if (!isset($_SESSION['user_id']) || !in_array($role, ['admin', 'staff', 'departm
 
                 <div class="admin-content-body">
                     <section class="chart-card chart-card-wide offices-card">
-                        <div class="offices-tools">
+                        <div class="offices-tools doc-filter-row">
                             <input type="text" id="search-history" placeholder="Search" aria-label="Search history">
                             <input type="date" aria-label="From date">
                             <input type="date" aria-label="To date">

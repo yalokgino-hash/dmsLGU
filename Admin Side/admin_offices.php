@@ -128,12 +128,24 @@ $addSuccess = isset($_GET['added']);
 $editSuccess = isset($_GET['edited']);
 $offices = getOffices($config);
 
+$search = trim($_GET['search'] ?? '');
+if ($search !== '') {
+    $offices = array_values(array_filter($offices, function ($o) use ($search) {
+        $q = mb_strtolower($search);
+        $code = mb_strtolower($o['office_code'] ?? '');
+        $name = mb_strtolower($o['office_name'] ?? '');
+        return (strpos($code, $q) !== false || strpos($name, $q) !== false);
+    }));
+}
+
 $limit = 10;
 $totalOffices = count($offices);
 $totalPages = max(1, (int) ceil($totalOffices / $limit));
 $page = max(1, min($totalPages, (int) ($_GET['page'] ?? 1)));
 $offset = ($page - 1) * $limit;
 $officesPage = array_slice($offices, $offset, $limit);
+
+$filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -230,17 +242,23 @@ $officesPage = array_slice($offices, $offset, $limit);
                 <div class="admin-content-body">
                     <section class="chart-card chart-card-wide offices-card">
                         <div class="offices-tools">
-                            <input type="text" placeholder="Search" aria-label="Search office">
-                            <input type="date" aria-label="From date">
-                            <input type="date" aria-label="To date">
-                            <button type="button" class="offices-btn" id="open-add-office-modal">
-                                <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                                Add Office
-                            </button>
-                            <button type="button" class="offices-btn offices-btn-secondary" id="open-edit-office-modal">
-                                <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                Edit
-                            </button>
+                            <form method="get" action="admin_offices.php" class="offices-tools-search" id="offices-filter-form">
+                                <input type="text" name="search" placeholder="Search by code or name" aria-label="Search office" value="<?= htmlspecialchars($search) ?>">
+                                <button type="submit" class="offices-btn offices-btn-filter" id="offices-filter-btn" title="Apply filter">
+                                    <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+                                    Filter
+                                </button>
+                            </form>
+                            <div class="offices-tools-actions">
+                                <button type="button" class="offices-btn" id="open-add-office-modal" title="Add a new office">
+                                    <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                                    Add Office
+                                </button>
+                                <button type="button" class="offices-btn offices-btn-secondary" id="open-edit-office-modal" title="Edit an existing office">
+                                    <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                    Edit
+                                </button>
+                            </div>
                         </div>
 
                         <div class="offices-table-frame">
@@ -255,7 +273,7 @@ $officesPage = array_slice($offices, $offset, $limit);
                             <tbody id="offices-table-body">
                                 <?php if (empty($officesPage)): ?>
                                 <tr id="no-offices-row">
-                                    <td colspan="3" class="offices-empty">No offices yet.</td>
+                                    <td colspan="3" class="offices-empty"><?= $search !== '' ? 'No offices match your search.' : 'No offices yet.' ?></td>
                                 </tr>
                                 <?php else: ?>
                                 <?php foreach ($officesPage as $i => $office): ?>
@@ -277,14 +295,15 @@ $officesPage = array_slice($offices, $offset, $limit);
                         </div>
                         <?php if ($totalPages > 1): ?>
                         <div class="offices-pagination">
+                            <?php $pagePrefix = $filterQuery ? $filterQuery . '&' : ''; ?>
                             <?php if ($page > 1): ?>
-                            <a href="?page=<?= $page - 1 ?>" class="offices-page-btn">Previous</a>
+                            <a href="?<?= $pagePrefix ?>page=<?= $page - 1 ?>" class="offices-page-btn">Previous</a>
                             <?php else: ?>
                             <span class="offices-page-btn disabled" aria-disabled="true">Previous</span>
                             <?php endif; ?>
-                            <span class="offices-page-info">Page <?= $page ?> of <?= $totalPages ?></span>
+                            <span class="offices-page-info">Page <?= $page ?> of <?= $totalPages ?><?= $search !== '' ? ' (filtered)' : '' ?></span>
                             <?php if ($page < $totalPages): ?>
-                            <a href="?page=<?= $page + 1 ?>" class="offices-page-btn">Next</a>
+                            <a href="?<?= $pagePrefix ?>page=<?= $page + 1 ?>" class="offices-page-btn">Next</a>
                             <?php else: ?>
                             <span class="offices-page-btn disabled" aria-disabled="true">Next</span>
                             <?php endif; ?>
