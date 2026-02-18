@@ -51,7 +51,7 @@ function updateOffice($config, $id, $officeCode, $officeName) {
     $officeCode = trim($officeCode);
     $officeName = trim($officeName);
     if ($id === '' || $officeCode === '' || $officeName === '') {
-        return ['success' => false, 'error' => 'Office ID, code and name are required.'];
+        return ['success' => false, 'error' => 'Department ID, code and name are required.'];
     }
     try {
         $manager = new MongoDB\Driver\Manager($config['uri']);
@@ -79,7 +79,7 @@ function addOffice($config, $officeCode, $officeName) {
     $officeCode = trim($officeCode);
     $officeName = trim($officeName);
     if ($officeCode === '' || $officeName === '') {
-        return ['success' => false, 'error' => 'Office code and name are required.'];
+        return ['success' => false, 'error' => 'Department code and name are required.'];
     }
     try {
         $manager = new MongoDB\Driver\Manager($config['uri']);
@@ -152,11 +152,12 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin - Offices</title>
+    <title>Admin - Departments</title>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="admin-offices.css?v=3">
+    <link rel="stylesheet" href="admin-dashboard.css">
+    <link rel="stylesheet" href="admin-offices.css">
     <style>
-    /* Force dark text in Select Office modal - override body's white inheritance */
+    /* Force dark text in Select Department modal - override body's white inheritance */
     body.admin-dashboard #select-office-modal .doc-modal-body-list,
     body.admin-dashboard #select-office-modal .doc-modal-body-list * {
         color: #1e293b !important;
@@ -179,52 +180,58 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
     }
     </style>
 </head>
-<body class="admin-dashboard admin-page-offices">
+<body class="admin-dashboard">
     <div class="admin-body">
-        <aside class="admin-sidebar">
-            <div class="sidebar-header">
-                <div class="sidebar-logo">
-                    <img src="../img/logo.png" alt="Municipal Logo">
+        <aside class="admin-sidebar admin-sidebar-design">
+            <div class="sidebar-header admin-sidebar-header">
+                <div class="sidebar-logo admin-sidebar-logo">
+                    <img src="../img/logo.png" alt="LGU Solano">
                 </div>
-                <div class="sidebar-title">
-                    <h2>LGU SOLANO<br><span>ADMIN DASHBOARD</span></h2>
+                <div class="sidebar-title admin-sidebar-title">
+                    <h2>LGU Solano</h2>
+                    <span class="admin-sidebar-subtitle">Document Management</span>
                 </div>
             </div>
-            <nav class="sidebar-nav">
-                <a href="admin_dashboard.php" class="sidebar-link" data-section="home">
-                    <svg class="sidebar-link-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
-                    Home
-                </a>
-                <a href="admin_offices.php" class="sidebar-link active" data-section="offices">
-                    <svg class="sidebar-link-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
-                    Offices
-                </a>
-                <a href="documents.php" class="sidebar-link" data-section="documents">
-                    <svg class="sidebar-link-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
-                    Documents
-                </a>
-                <a href="document_history.php" class="sidebar-link" data-section="history">
-                    <svg class="sidebar-link-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l2 2"/><circle cx="12" cy="12" r="10"/></svg>
-                    Documents History
-                </a>
+            <nav class="sidebar-nav admin-sidebar-nav">
+                <div class="sidebar-section">
+                    <span class="sidebar-section-title">MAIN MENU</span>
+                    <a href="admin_dashboard.php" class="sidebar-link">
+                        <svg class="sidebar-link-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                        Dashboard
+                    </a>
+                    <a href="documents.php" class="sidebar-link">
+                        <svg class="sidebar-link-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+                        Documents
+                    </a>
+                    <a href="admin_offices.php" class="sidebar-link active">
+                        <svg class="sidebar-link-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
+                        Departments
+                    </a>
+                    <a href="document_history.php" class="sidebar-link">
+                        <svg class="sidebar-link-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 8v4l2 2"/><circle cx="12" cy="12" r="10"/></svg>
+                        Documents History
+                    </a>
+                </div>
+                <div class="sidebar-section sidebar-section-account">
+                    <span class="sidebar-section-title">ACCOUNT</span>
+                    <a href="../Front Desk Side/settings.php" class="sidebar-link sidebar-link-settings">
+                        <svg class="sidebar-link-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+                        Settings
+                    </a>
+                </div>
             </nav>
         </aside>
 
-        <main class="admin-main" style="background:#fff;">
-            <div class="admin-content" id="admin-content" style="background:#fff; color:#1e293b;">
+        <main class="admin-main">
+            <div class="admin-content" id="admin-content">
                 <div class="admin-content-header-row">
                     <header class="admin-content-header">
-                        <div class="admin-header-icon">
-                            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                            </svg>
-                        </div>
                         <div class="admin-header-text">
-                            <h1 class="admin-content-title">Offices</h1>
-                            <p class="admin-content-subtitle">Manage municipal offices and departments for document routing and classification</p>
+                            <h1 class="admin-content-title">Departments</h1>
+                            <p class="admin-content-subtitle">Manage municipal departments for document routing and classification</p>
                         </div>
                     </header>
-                    <div class="admin-content-icons">
+                    <div class="admin-content-actions">
                         <button type="button" class="admin-icon-btn" id="notif-btn" title="Notifications" aria-label="Notifications">
                             <svg class="icon-bell" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
                         </button>
@@ -243,18 +250,18 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                     <section class="chart-card chart-card-wide offices-card">
                         <div class="offices-tools">
                             <form method="get" action="admin_offices.php" class="offices-tools-search" id="offices-filter-form">
-                                <input type="text" name="search" placeholder="Search by code or name" aria-label="Search office" value="<?= htmlspecialchars($search) ?>">
+                                <input type="text" name="search" placeholder="Search by code or name" aria-label="Search department" value="<?= htmlspecialchars($search) ?>">
                                 <button type="submit" class="offices-btn offices-btn-filter" id="offices-filter-btn" title="Apply filter">
                                     <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
                                     Filter
                                 </button>
                             </form>
                             <div class="offices-tools-actions">
-                                <button type="button" class="offices-btn" id="open-add-office-modal" title="Add a new office">
+                                <button type="button" class="offices-btn" id="open-add-office-modal" title="Add a new department">
                                     <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-                                    Add Office
+                                    Add Department
                                 </button>
-                                <button type="button" class="offices-btn offices-btn-secondary" id="open-edit-office-modal" title="Edit an existing office">
+                                <button type="button" class="offices-btn offices-btn-secondary" id="open-edit-office-modal" title="Edit an existing department">
                                     <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                                     Edit
                                 </button>
@@ -266,14 +273,14 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                             <thead>
                                 <tr>
                                     <th>NO.</th>
-                                    <th>OFFICE CODE</th>
-                                    <th>OFFICE NAME</th>
+                                    <th>DEPARTMENT CODE</th>
+                                    <th>DEPARTMENT NAME</th>
                                 </tr>
                             </thead>
                             <tbody id="offices-table-body">
                                 <?php if (empty($officesPage)): ?>
                                 <tr id="no-offices-row">
-                                    <td colspan="3" class="offices-empty"><?= $search !== '' ? 'No offices match your search.' : 'No offices yet.' ?></td>
+                                    <td colspan="3" class="offices-empty"><?= $search !== '' ? 'No departments match your search.' : 'No departments yet.' ?></td>
                                 </tr>
                                 <?php else: ?>
                                 <?php foreach ($officesPage as $i => $office): ?>
@@ -316,22 +323,22 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
     </div>
 
     <?php if ($addSuccess): ?>
-    <div class="offices-toast" id="offices-success-toast">Office added successfully.</div>
+    <div class="offices-toast" id="offices-success-toast">Department added successfully.</div>
     <?php endif; ?>
     <?php if ($editSuccess): ?>
-    <div class="offices-toast" id="offices-edit-toast">Office updated successfully.</div>
+    <div class="offices-toast" id="offices-edit-toast">Department updated successfully.</div>
     <?php endif; ?>
 
     <div class="doc-modal" id="select-office-modal" hidden>
         <button type="button" class="doc-modal-overlay" data-close-select-office aria-label="Close"></button>
         <div class="doc-modal-dialog doc-modal-dialog-list" role="dialog" aria-modal="true" aria-labelledby="select-office-title">
             <div class="doc-modal-header">
-                <h2 id="select-office-title">Select Office to Edit</h2>
+                <h2 id="select-office-title">Select Department to Edit</h2>
                 <button type="button" class="doc-modal-close" data-close-select-office aria-label="Close">&times;</button>
             </div>
             <div class="doc-modal-body-list" style="color:#1e293b;">
                 <?php if (empty($offices)): ?>
-                <p class="offices-list-empty" style="color:#475569;">No offices to edit.</p>
+                <p class="offices-list-empty" style="color:#475569;">No departments to edit.</p>
                 <?php else: ?>
                 <ul class="offices-list" id="offices-list" style="color:#1e293b;">
                     <?php 
@@ -363,24 +370,24 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
         <button type="button" class="doc-modal-overlay" data-close-edit-office aria-label="Close"></button>
         <div class="doc-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-office-title">
             <div class="doc-modal-header">
-                <h2 id="edit-office-title">Edit Office</h2>
+                <h2 id="edit-office-title">Edit Department</h2>
                 <button type="button" class="doc-modal-close" data-close-edit-office aria-label="Close">&times;</button>
             </div>
             <form id="edit-office-form" class="doc-modal-form" method="post" action="admin_offices.php">
                 <input type="hidden" name="edit_office" value="1">
                 <input type="hidden" name="office_id" id="edit-office-id" value="<?= isset($_POST['office_id']) ? htmlspecialchars($_POST['office_id']) : '' ?>">
                 <div class="doc-form-field">
-                    <label for="edit-office-code">Office Code</label>
-                    <input type="text" id="edit-office-code" name="office_code" placeholder="Enter office or department code" required value="<?= isset($_POST['edit_office'], $_POST['office_code']) ? htmlspecialchars($_POST['office_code']) : '' ?>">
+                    <label for="edit-office-code">Department Code</label>
+                    <input type="text" id="edit-office-code" name="office_code" placeholder="Enter department code" required value="<?= isset($_POST['edit_office'], $_POST['office_code']) ? htmlspecialchars($_POST['office_code']) : '' ?>">
                 </div>
                 <div class="doc-form-field">
-                    <label for="edit-office-name">Office Name</label>
-                    <input type="text" id="edit-office-name" name="office_name" placeholder="Enter office or department name" required value="<?= isset($_POST['edit_office'], $_POST['office_name']) ? htmlspecialchars($_POST['office_name']) : '' ?>">
+                    <label for="edit-office-name">Department Name</label>
+                    <input type="text" id="edit-office-name" name="office_name" placeholder="Enter department name" required value="<?= isset($_POST['edit_office'], $_POST['office_name']) ? htmlspecialchars($_POST['office_name']) : '' ?>">
                 </div>
                 <p class="doc-form-error" id="edit-office-form-error" <?= $editError ? '' : 'hidden' ?>><?= $editError ? htmlspecialchars($editError) : '' ?></p>
                 <div class="doc-modal-actions">
                     <button type="button" class="doc-btn doc-btn-cancel" data-close-edit-office>Cancel</button>
-                    <button type="submit" class="doc-btn doc-btn-save">Update Office</button>
+                    <button type="submit" class="doc-btn doc-btn-save">Update Department</button>
                 </div>
             </form>
         </div>
@@ -390,23 +397,23 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
         <button type="button" class="doc-modal-overlay" data-close-add-office aria-label="Close"></button>
         <div class="doc-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="add-office-title">
             <div class="doc-modal-header">
-                <h2 id="add-office-title">Add Office</h2>
+                <h2 id="add-office-title">Add Department</h2>
                 <button type="button" class="doc-modal-close" data-close-add-office aria-label="Close">&times;</button>
             </div>
             <form id="add-office-form" class="doc-modal-form" method="post" action="admin_offices.php">
                 <input type="hidden" name="add_office" value="1">
                 <div class="doc-form-field">
-                    <label for="office-code">Office Code</label>
-                    <input type="text" id="office-code" name="office_code" placeholder="Enter office or department code" required value="<?= isset($_POST['office_code']) ? htmlspecialchars($_POST['office_code']) : '' ?>">
+                    <label for="office-code">Department Code</label>
+                    <input type="text" id="office-code" name="office_code" placeholder="Enter department code" required value="<?= isset($_POST['office_code']) ? htmlspecialchars($_POST['office_code']) : '' ?>">
                 </div>
                 <div class="doc-form-field">
-                    <label for="office-name">Office Name</label>
-                    <input type="text" id="office-name" name="office_name" placeholder="Enter office or department name" required value="<?= isset($_POST['office_name']) ? htmlspecialchars($_POST['office_name']) : '' ?>">
+                    <label for="office-name">Department Name</label>
+                    <input type="text" id="office-name" name="office_name" placeholder="Enter department name" required value="<?= isset($_POST['office_name']) ? htmlspecialchars($_POST['office_name']) : '' ?>">
                 </div>
                 <p class="doc-form-error" id="office-form-error" <?= $addError ? '' : 'hidden' ?>><?= $addError ? htmlspecialchars($addError) : '' ?></p>
                 <div class="doc-modal-actions">
                     <button type="button" class="doc-btn doc-btn-cancel" data-close-add-office>Cancel</button>
-                    <button type="submit" class="doc-btn doc-btn-save">Save Office</button>
+                    <button type="submit" class="doc-btn doc-btn-save">Save Department</button>
                 </div>
             </form>
         </div>
