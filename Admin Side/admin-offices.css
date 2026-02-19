@@ -1,4 +1,8 @@
 /* Load admin-dashboard.css first in HTML; this file adds page-specific overrides. */
+/* Fonts and font sizes match offices-department.php (system-ui stack) */
+body {
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
 
 /* Same header look on all admin pages (dashboard, offices, documents, history) */
 .admin-dashboard .admin-content-header-row {
@@ -70,7 +74,7 @@
     color: #1e293b;
     background: #fff;
     outline: none;
-    font-family: 'Poppins', sans-serif;
+    font-family: inherit;
 }
 
 .offices-tools-search input:focus {
@@ -109,7 +113,7 @@
     color: #1e293b;
     background: #fff;
     outline: none;
-    font-family: 'Poppins', sans-serif;
+    font-family: inherit;
 }
 
 .offices-tools.doc-filter-row input:focus {
@@ -121,21 +125,21 @@
     color: #94a3b8;
 }
 
-/* Match dashboard .btn-upload-document: primary blue button */
+/* Match offices-department.php .offices-btn */
 .offices-btn {
     display: inline-flex;
     align-items: center;
     gap: 8px;
     height: 42px;
+    padding: 0 16px;
     border: none;
     border-radius: 10px;
-    padding: 0 18px;
     background: #2563eb;
     color: #fff;
-    font-size: 0.95rem;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
-    font-family: 'Poppins', sans-serif;
+    font-family: inherit;
     transition: background 0.2s ease;
 }
 
@@ -235,7 +239,7 @@
     border: none;
     cursor: pointer;
     transition: background 0.2s ease;
-    font-family: 'Poppins', sans-serif;
+    font-family: inherit;
 }
 
 .offices-page-btn:hover:not(.disabled):not(:disabled) {
@@ -251,7 +255,7 @@
 }
 
 .offices-page-info {
-    font-size: 14px;
+    font-size: 0.95rem;
     font-weight: 500;
     color: #475569 !important;
 }
@@ -355,8 +359,8 @@
 
 .doc-modal-header h2 {
     margin: 0;
-    font-size: 1.1rem;
-    font-weight: 600;
+    font-size: 1.35rem;
+    font-weight: 700;
     color: #1e293b;
 }
 
@@ -399,7 +403,7 @@
     font-size: 14px;
     color: #1e293b;
     background: #fff;
-    font-family: 'Poppins', sans-serif;
+    font-family: inherit;
 }
 
 .doc-form-field input[type="file"] {
@@ -428,6 +432,7 @@
     font-size: 14px;
     font-weight: 600;
     cursor: pointer;
+    font-family: inherit;
 }
 
 .doc-btn-cancel {
@@ -458,7 +463,7 @@
     padding: 12px 20px;
     background: #166534;
     color: #fff;
-    font-size: 14px;
+    font-size: 0.95rem;
     font-weight: 500;
     border-radius: 10px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
@@ -508,7 +513,7 @@
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease;
     color: #1e293b !important;
-    font-size: 15px;
+    font-size: 0.95rem;
 }
 
 .offices-list-item:hover {
@@ -531,13 +536,13 @@
     font-weight: 600;
     color: #1e293b !important;
     min-width: 100px;
-    font-size: 15px;
+    font-size: 0.95rem;
 }
 
 .offices-list-name {
     flex: 1;
     color: #475569 !important;
-    font-size: 15px;
+    font-size: 0.95rem;
 }
 
 .offices-list-arrow {
@@ -548,7 +553,7 @@
 .offices-list-empty {
     margin: 0;
     color: #475569 !important;
-    font-size: 14px;
+    font-size: 1rem;
     text-align: center;
     padding: 2rem 0;
 }
@@ -563,4 +568,435 @@ body.admin-dashboard #select-office-modal .doc-modal-body-list p {
 }
 body.admin-dashboard #select-office-modal .offices-list-name {
     color: #475569 !important;
+}
+
+/* Page header styles */
+.dept-page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.dept-page-title {
+    margin: 0;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #1e293b;
+}
+
+.dept-page-subtitle {
+    margin: 0.25rem 0 0 0;
+    font-size: 0.95rem;
+    color: #64748b;
+}
+
+/* Card-based grid layout styles */
+.dept-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    align-items: stretch;
+}
+
+.dept-card {
+    background: #fff;
+    border-radius: 0.75rem;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    transition: box-shadow 0.2s ease;
+    min-height: 320px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.dept-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.dept-card-header {
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding-bottom: 0.5rem;
+}
+
+.dept-card-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+    flex: 1;
+}
+
+.dept-card-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 0.5rem;
+    background: #dbeafe;
+    color: #2563eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.dept-card-icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+.dept-card-title-wrap {
+    min-width: 0;
+}
+
+.dept-card-name {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+    line-height: 1.3;
+    letter-spacing: -0.01em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.dept-card-code {
+    font-size: 0.875rem;
+    color: #64748b;
+    margin: 0;
+    font-family: ui-monospace, 'JetBrains Mono', monospace;
+}
+
+.dept-card-content {
+    padding: 0 1.5rem 1.5rem;
+    padding-top: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.dept-card-desc {
+    font-size: 0.875rem;
+    color: #475569;
+    margin: 0 0 1rem 0;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.dept-card-menu {
+    position: relative;
+    flex-shrink: 0;
+}
+
+.dept-card-menu-btn {
+    width: 36px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    color: #64748b;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.dept-card-menu-btn:hover {
+    background: #FEF3C7;
+    color: #92400e;
+}
+
+.dept-card-menu-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+.dept-card-dropdown {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    margin-top: 4px;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    border: 1px solid #e5e7eb;
+    padding: 6px 0;
+    min-width: 180px;
+    z-index: 50;
+    display: none;
+}
+
+.dept-card-dropdown.show {
+    display: block;
+}
+
+.dept-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 14px;
+    border: none;
+    background: none;
+    color: #1e293b;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    text-align: left;
+    white-space: nowrap;
+    transition: background 0.15s ease, color 0.15s ease;
+    font-family: inherit;
+}
+
+.dept-dropdown-item:hover {
+    background: #FEF3C7;
+    color: #92400e;
+}
+
+.dept-dropdown-item svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.dept-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #64748b;
+    font-size: 1rem;
+}
+
+.dept-add-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0.6rem 1.25rem;
+    background: #1A202C;
+    color: #fff;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s;
+    font-family: inherit;
+}
+
+.dept-add-btn:hover {
+    background: #2d3748;
+    color: #fff;
+}
+
+.dept-add-btn svg {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.dept-search-row {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin-bottom: 1.5rem;
+    max-width: 100%;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+
+.dept-search-row:focus-within {
+    border-color: #3B82F6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.dept-search-wrap {
+    flex: 1;
+    position: relative;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+}
+
+.dept-search-wrap svg {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    color: #94a3b8;
+    pointer-events: none;
+    flex-shrink: 0;
+}
+
+.dept-search {
+    width: 100%;
+    height: 44px;
+    padding: 0 16px 0 44px;
+    border: none;
+    border-radius: 0;
+    font-size: 0.95rem;
+    color: #1e293b;
+    background: transparent;
+    outline: none;
+    font-family: inherit;
+}
+
+.dept-search::placeholder {
+    color: #94a3b8;
+}
+
+.dept-filter-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 20px;
+    border: none;
+    border-left: 1px solid rgba(255,255,255,0.08);
+    border-radius: 0;
+    background: #1A202C;
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    transition: background 0.15s, color 0.15s;
+    flex-shrink: 0;
+    font-family: inherit;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.dept-filter-btn:hover {
+    background: #2d3748;
+    color: #fff;
+    border-left-color: rgba(255,255,255,0.08);
+}
+
+.dept-filter-btn svg {
+    width: 18px;
+    height: 18px;
+    flex-shrink: 0;
+}
+
+@media (max-width: 1024px) {
+    .dept-cards-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .dept-cards-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Date inputs and actions on the right side of the search bar */
+.dept-search-row-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding-left: 12px;
+    border-left: 1px solid #e2e8f0;
+    background: #fff;
+}
+
+/* Actions on the left side of the search bar (e.g. Add Department) */
+.dept-search-row-actions-left {
+    padding-left: 0;
+    padding-right: 12px;
+    border-left: none;
+    border-right: 1px solid #e2e8f0;
+}
+
+/* Date filters inside the search bar (between search and Filter button) */
+.dept-search-row-dates {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    flex-shrink: 0;
+    border-left: 1px solid #e2e8f0;
+    background: #fff;
+}
+
+.dept-search-row-dates .dept-date-input {
+    height: 44px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 0;
+    border-right: 1px solid #e2e8f0;
+    font-size: 0.9rem;
+    color: #1e293b;
+    background: #fff;
+    font-family: inherit;
+    flex-shrink: 0;
+    min-width: 0;
+}
+
+.dept-search-row-dates .dept-date-input:last-of-type {
+    border-right: none;
+}
+
+.dept-search-row-dates .dept-date-input:focus {
+    outline: none;
+    background: #fafbfc;
+}
+
+.dept-search-row:focus-within .dept-search-row-dates .dept-date-input:focus {
+    background: #fff;
+}
+
+.dept-search-row .dept-date-input {
+    height: 40px;
+    padding: 0 10px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    color: #1e293b;
+    background: #fff;
+    font-family: inherit;
+    flex-shrink: 0;
+}
+
+.dept-search-row .dept-date-input:focus {
+    outline: none;
+    border-color: #3B82F6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+/* Standalone date input (if used elsewhere) */
+.dept-date-input {
+    height: 44px;
+    padding: 0 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    color: #1e293b;
+    background: #fff;
+    font-family: inherit;
+}
+
+.dept-date-input:focus {
+    outline: none;
+    border-color: #3B82F6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
 }
