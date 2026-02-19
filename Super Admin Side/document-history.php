@@ -23,17 +23,19 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
     <meta charset="UTF-8">
     <title>DMS LGU – Documents History</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="sidebar_super_admin.css">
     <link rel="stylesheet" href="profile_modal_super_admin.css">
+    <link rel="stylesheet" href="../Admin Side/admin-dashboard.css">
+    <link rel="stylesheet" href="../Admin Side/admin-offices.css">
+    <link rel="stylesheet" href="sidebar_super_admin.css">
     <style>
-        body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
-        .main-content { background: #f8fafc; }
-        .content-header { background: #fff; padding: 1.5rem 2.2rem; border-bottom: 1px solid #e2e8f0; }
+        body { margin: 0; background: #f8fafc; color: #0f172a; }
+        .main-content { display: flex; flex-direction: column; flex: 1; min-height: 0; background: #fff; }
+        .content-header { background: #fff; padding: 1.5rem 2.2rem; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
         .dashboard-header { display: flex; justify-content: space-between; align-items: center; }
         .dashboard-header h1 { font-size: 1.6rem; margin: 0 0 0.2rem 0; font-weight: 700; color: #1e293b; }
         .dashboard-header small { display: block; color: #64748b; font-size: 0.95rem; margin-top: 6px; }
-        .content-body { padding: 2rem 2.2rem; }
         .header-controls { position: relative; }
         .icon-btn, .avatar-btn { background: #f1f5f9; border: none; color: #475569; padding: 0; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
         .icon-btn:hover, .avatar-btn:hover { background: #e2e8f0; color: #1e293b; }
@@ -41,26 +43,9 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
         .icon-btn svg, .avatar-btn svg { width: 22px; height: 22px; }
         .notif-badge { position: absolute; top: 8px; right: 8px; background: #ef4444; color: white; font-size: 12px; padding: 4px 8px; border-radius: 999px; line-height: 1; }
         .avatar-btn { width: 40px; height: 40px; padding: 0; border-radius: 10px; }
-        .notif-dropdown, .profile-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 180px; border-radius: 6px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 8px 0; }
+        .notif-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 180px; border-radius: 6px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 8px 0; }
         .notif-item { padding: 10px 12px; font-size: 0.95rem; color: #475569; }
-        .profile-link { display: flex; align-items: center; gap: 8px; padding: 10px 12px; text-decoration: none; color: #0b1720; }
-        .profile-link svg { width: 16px; height: 16px; flex-shrink: 0; }
-        .profile-link:hover { background: #f1f5f9; }
-        /* Document history section */
-        .history-card { background: #fff; border: 2px solid #0b0b0b; border-radius: 4px; padding: 1.5rem; }
-        .history-title { font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; font-size: 1.05rem; color: #0b1720; margin: 0 0 1rem 0; }
-        .history-tools { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto; gap: 12px; margin-bottom: 16px; }
-        .history-tools input { height: 42px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 0 12px; font-size: 14px; color: #1e293b; background: #fff; outline: none; }
-        .history-tools input:focus { border-color: #1e3a5f; box-shadow: 0 0 0 3px rgba(30,58,95,0.15); }
-        .history-btn { height: 42px; border: none; border-radius: 10px; padding: 0 16px; background: #1e3a5f; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
-        .history-btn:hover { background: #2d4a6f; }
-        .history-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
-        .history-table-frame { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; overflow: hidden; margin-top: 1rem; }
-        .history-table { width: 100%; border-collapse: collapse; }
-        .history-table thead th { text-align: left; padding: 14px 16px; font-size: 13px; font-weight: 600; letter-spacing: 0.03em; color: #475569; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
-        .history-table tbody td { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; color: #334155; font-size: 14px; }
-        .history-empty { text-align: center; height: 200px; color: #64748b; vertical-align: middle; }
-        @media (max-width: 980px) { .history-tools { grid-template-columns: 1fr 1fr; } }
+        .main-content .admin-content-body { padding-top: 24px; }
     </style>
 </head>
 <body>
@@ -93,31 +78,33 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
                 </div>
             </div>
 
-            <div class="content-body">
-                <section class="history-card">
-                    <h2 class="history-title">Document History &amp; Transactions</h2>
-                    <div class="history-tools">
-                        <input type="text" placeholder="Search by code or title" aria-label="Search">
+            <div class="admin-content-body">
+                <section class="chart-card chart-card-wide offices-card">
+                    <div class="offices-tools doc-filter-row">
+                        <input type="text" id="search-history" placeholder="Search" aria-label="Search history">
                         <input type="date" aria-label="From date">
                         <input type="date" aria-label="To date">
-                        <button type="button" class="history-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>Search</button>
+                        <button type="button" class="offices-btn offices-btn-secondary" id="export-history-btn">
+                            <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+                            Export
+                        </button>
                     </div>
 
-                    <div class="history-table-frame">
-                        <table class="history-table">
+                    <div class="offices-table-frame">
+                        <table class="offices-table">
                             <thead>
                                 <tr>
                                     <th>NO.</th>
+                                    <th>DATE & TIME</th>
+                                    <th>ACTION</th>
                                     <th>DOCUMENT CODE</th>
                                     <th>DOCUMENT TITLE</th>
-                                    <th>DATE/TIME</th>
-                                    <th>ACTION</th>
                                     <th>USER</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody id="history-table-body">
                                 <tr>
-                                    <td colspan="6" class="history-empty">No document history yet.</td>
+                                    <td colspan="6" class="offices-empty" id="no-history-row">No history yet.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -126,16 +113,61 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
             </div>
         </div>
     </div>
+
     <?php include __DIR__ . '/_profile_modal_super_admin.php'; ?>
-<script>
-(function(){
-    var notifBtn = document.getElementById('notif-btn');
-    var notifDropdown = document.getElementById('notif-dropdown');
-    function closeNotif(){ if (notifDropdown) notifDropdown.style.display = 'none'; }
-    if (notifBtn) notifBtn.addEventListener('click', function(e){ e.stopPropagation(); if (!notifDropdown) return; var showing = notifDropdown.style.display === 'block'; closeNotif(); notifDropdown.style.display = showing ? 'none' : 'block'; });
-    document.addEventListener('click', function(){ closeNotif(); });
-})();
-</script>
-<script src="sidebar_super_admin.js"></script>
+
+    <script>
+    (function() {
+        var exportBtn = document.getElementById('export-history-btn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', function() {
+                alert('Export history. (Export function can be wired to backend later.)');
+            });
+        }
+
+        var searchInput = document.getElementById('search-history');
+        var historyTableBody = document.getElementById('history-table-body');
+        var noHistoryRow = document.getElementById('no-history-row');
+
+        function filterHistory() {
+            var query = (searchInput && searchInput.value || '').trim().toLowerCase();
+            var dataRows = historyTableBody ? historyTableBody.querySelectorAll('tr[data-history-row]') : [];
+            var hasDataRows = dataRows.length > 0;
+
+            if (!hasDataRows) {
+                if (noHistoryRow) noHistoryRow.style.display = '';
+                return;
+            }
+
+            var visibleCount = 0;
+            dataRows.forEach(function(row) {
+                var text = row.textContent || '';
+                var match = !query || text.toLowerCase().indexOf(query) !== -1;
+                row.style.display = match ? '' : 'none';
+                if (match) visibleCount++;
+            });
+
+            if (noHistoryRow) {
+                noHistoryRow.style.display = visibleCount === 0 ? '' : 'none';
+                noHistoryRow.textContent = visibleCount === 0 && query ? 'No matching results.' : 'No history yet.';
+            }
+        }
+
+        if (searchInput) {
+            searchInput.addEventListener('input', filterHistory);
+            searchInput.addEventListener('keyup', filterHistory);
+        }
+    })();
+    </script>
+    <script>
+    (function(){
+        var notifBtn = document.getElementById('notif-btn');
+        var notifDropdown = document.getElementById('notif-dropdown');
+        function closeNotif(){ if (notifDropdown) notifDropdown.style.display = 'none'; }
+        if (notifBtn) notifBtn.addEventListener('click', function(e){ e.stopPropagation(); if (!notifDropdown) return; var showing = notifDropdown.style.display === 'block'; closeNotif(); notifDropdown.style.display = showing ? 'none' : 'block'; });
+        document.addEventListener('click', function(){ closeNotif(); });
+    })();
+    </script>
+    <script src="sidebar_super_admin.js"></script>
 </body>
 </html>

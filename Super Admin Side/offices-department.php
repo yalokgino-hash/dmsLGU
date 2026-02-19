@@ -29,8 +29,9 @@ function getOfficeManager() {
 }
 
 /**
- * Fetch all user accounts for dropdowns (e.g. assign department head).
- * @return array List of user records with _id (string), name, email
+ * Fetch user accounts that have a name/username set (same source as User Management).
+ * Used for Assign Head dropdown – only users that appear as "named" in users.php.
+ * @return array List of user records with _id (string), username, name, email
  */
 function getUsers() {
     global $config;
@@ -43,7 +44,11 @@ function getUsers() {
         foreach ($cursor as $doc) {
             $arr = (array)$doc;
             $arr['_id'] = (string)$arr['_id'];
-            $rows[] = $arr;
+            $username = trim($arr['username'] ?? '');
+            $name = trim($arr['name'] ?? '');
+            if ($username !== '' || $name !== '') {
+                $rows[] = $arr;
+            }
         }
         return $rows;
     } catch (Exception $e) {
@@ -589,7 +594,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                         <div class="offices-field"><label>Department Code <span class="required">*</span></label><input type="text" name="office_code" id="edit-office-code" required></div>
                         <div class="offices-field"><label>Department Name <span class="required">*</span></label><input type="text" name="office_name" id="edit-office-name" required></div>
                         <div class="offices-field"><label>Description</label><textarea name="description" id="edit-office-desc" rows="3" placeholder="Brief description of the department..."></textarea></div>
-                        <div class="offices-field"><label>Department Head</label><input type="text" name="office_head" id="edit-office-head" placeholder="e.g., Juan Dela Cruz"></div>
+                        <input type="hidden" name="office_head" id="edit-office-head" value="">
                         <div class="offices-modal-actions">
                             <button type="button" class="offices-btn offices-btn-secondary" onclick="closeEditModal()">Cancel</button>
                             <button type="submit" class="offices-btn">Update</button>
@@ -618,8 +623,9 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                                 <option value="">— Select user —</option>
                                 <?php foreach ($usersList as $u):
                                     $username = trim($u['username'] ?? '');
-                                    $label = $username !== '' ? $username : (trim($u['name'] ?? '') ?: trim($u['email'] ?? ''));
-                                    if ($label === '') $label = (string)$u['_id'];
+                                    $name = trim($u['name'] ?? '');
+                                    $label = $username !== '' ? $username : ($name !== '' ? $name : trim($u['email'] ?? ''));
+                                    if ($label === '') continue;
                                 ?>
                                 <option value="<?= htmlspecialchars($u['_id']) ?>"><?= htmlspecialchars($label) ?></option>
                                 <?php endforeach; ?>
@@ -666,34 +672,50 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                 document.getElementById('modal-assign-head').style.display = 'flex';
             }
             function closeAssignHeadModal() { document.getElementById('modal-assign-head').style.display = 'none'; }
-            var deleteModalOverlay = document.getElementById('delete-confirm-modal-overlay');
-            var deleteConfirmMessage = document.getElementById('delete-confirm-message');
-            var deleteOfficeIdInput = document.getElementById('delete-office-id');
-            var deleteForm = document.getElementById('delete-office-form');
-            var deleteConfirmCancel = document.getElementById('delete-confirm-cancel');
-            var deleteConfirmDelete = document.getElementById('delete-confirm-delete');
-            function openDeleteConfirmModal(id, name) {
-                if (!id || !deleteModalOverlay) return;
-                deleteOfficeIdInput.value = id;
-                deleteConfirmMessage.textContent = 'Are you sure you want to delete "' + (name || 'this department') + '"? This action cannot be undone.';
-                deleteModalOverlay.classList.add('show');
+            function setupDeleteDepartment() {
+                var deleteModalOverlay = document.getElementById('delete-confirm-modal-overlay');
+                var deleteConfirmMessage = document.getElementById('delete-confirm-message');
+                var deleteOfficeIdInput = document.getElementById('delete-office-id');
+                var deleteForm = document.getElementById('delete-office-form');
+                var deleteConfirmCancel = document.getElementById('delete-confirm-cancel');
+                var deleteConfirmDelete = document.getElementById('delete-confirm-delete');
+                if (!deleteForm || !deleteOfficeIdInput) return;
+                window.openDeleteConfirmModal = function(id, name) {
+                    if (!id || !deleteModalOverlay) return;
+                    deleteOfficeIdInput.value = id;
+                    if (deleteConfirmMessage) deleteConfirmMessage.textContent = 'Are you sure you want to delete "' + (name || 'this department') + '"? This action cannot be undone.';
+                    deleteModalOverlay.classList.add('show');
+                };
+                window.closeDeleteConfirmModal = function() {
+                    if (deleteModalOverlay) deleteModalOverlay.classList.remove('show');
+                };
+                if (deleteConfirmCancel) deleteConfirmCancel.addEventListener('click', window.closeDeleteConfirmModal);
+                if (deleteConfirmDelete) deleteConfirmDelete.addEventListener('click', function() {
+                    deleteForm.submit();
+                });
+                if (deleteModalOverlay) deleteModalOverlay.addEventListener('click', function(e) {
+                    if (e.target === deleteModalOverlay) window.closeDeleteConfirmModal();
+                });
             }
-            function closeDeleteConfirmModal() {
-                if (deleteModalOverlay) deleteModalOverlay.classList.remove('show');
-            }
-            if (deleteConfirmCancel) deleteConfirmCancel.addEventListener('click', closeDeleteConfirmModal);
-            if (deleteConfirmDelete && deleteForm) deleteConfirmDelete.addEventListener('click', function() {
-                deleteForm.submit();
-            });
-            if (deleteModalOverlay) deleteModalOverlay.addEventListener('click', function(e) {
-                if (e.target === deleteModalOverlay) closeDeleteConfirmModal();
-            });
             function confirmDeleteOffice(btn) {
                 var d = btn.dataset || {};
                 var id = d.id || '';
-                var name = d.name || 'this department';
+                var name = (d.name || 'this department').trim();
                 if (!id) return;
-                openDeleteConfirmModal(id, name);
+                if (typeof window.openDeleteConfirmModal === 'function') {
+                    window.openDeleteConfirmModal(id, name);
+                } else {
+                    if (confirm('Are you sure you want to delete "' + name + '"? This action cannot be undone.')) {
+                        var form = document.getElementById('delete-office-form');
+                        var input = document.getElementById('delete-office-id');
+                        if (form && input) { input.value = id; form.submit(); }
+                    }
+                }
+            }
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', setupDeleteDepartment);
+            } else {
+                setupDeleteDepartment();
             }
             function toggleCardMenu(menuBtn) {
                 var dropdown = menuBtn.closest('.dept-card-menu').querySelector('.dept-card-dropdown');
