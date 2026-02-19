@@ -278,47 +278,11 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
     <title>DMS LGU – Offices/Department</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="sidebar_super_admin.css">
+    <link rel="stylesheet" href="profile_modal_super_admin.css">
     <style>
         body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
-        .dashboard-container { display: flex; min-height: 100vh; border-top: 3px solid #D4AF37; }
-        .sidebar { width: 260px; height: 100vh; position: fixed; left: 0; top: 0; z-index: 100; background: #1A202C; color: #fff; display: flex; flex-direction: column; box-shadow: 2px 0 12px rgba(0,0,0,0.08); border-right: 1px solid rgba(255, 255, 255, 0.06); }
-        .sidebar-header { padding: 1.25rem 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; flex-direction: row; align-items: center; gap: 0.75rem; text-align: left; }
-        .sidebar-logo { flex-shrink: 0; width: 44px; height: 44px; background: #63B3ED; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
-        .sidebar-logo img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
-        .sidebar-header .sidebar-title { text-align: left; }
-        .sidebar-header .sidebar-title h2 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #fff; line-height: 1.3; text-transform: none; letter-spacing: 0.02em; }
-        .sidebar-header .sidebar-title h2 span { font-size: 0.75rem; font-weight: 500; display: block; color: #A0AEC0; margin-top: 2px; letter-spacing: 0.02em; }
-        .sidebar-nav { flex: 1; padding: 1rem 0.75rem; overflow-y: auto; }
-        .sidebar-nav .nav-section-title { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; color: #718096; padding: 0.75rem 0.75rem 0.35rem; text-transform: uppercase; }
-        .sidebar-nav ul { list-style: none; padding: 0; margin: 0; }
-        .sidebar-nav li { margin: 0.2rem 0; }
-        .sidebar-nav a { display: flex; align-items: center; gap: 10px; padding: 0.6rem 0.75rem; color: #fff; text-decoration: none; font-size: 0.95rem; font-weight: 500; border-radius: 8px; transition: background 0.15s ease, color 0.15s ease; letter-spacing: 0.02em; }
-        .sidebar-nav a .nav-icon { width: 22px; height: 22px; flex-shrink: 0; color: #A0AEC0; transition: color 0.15s ease; }
-        .sidebar-nav a:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
-        .sidebar-nav a:hover .nav-icon { color: #fff; }
-        .sidebar-nav a.active { background: #3B82F6; color: #fff; }
-        .sidebar-nav a.active .nav-icon { color: #fff; }
-        .sidebar-user-wrap { position: relative; padding: 0 1rem 1.25rem 1rem; border-top: 1px solid rgba(255, 255, 255, 0.06); }
-        .sidebar-user { padding: 0.75rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; cursor: pointer; transition: background 0.2s ease, transform 0.2s ease; }
-        .sidebar-user:hover { background: rgba(255, 255, 255, 0.08); }
-        .sidebar-user:active { transform: scale(0.98); }
-        .sidebar-user-avatar { width: 40px; height: 40px; border-radius: 50%; background: #63B3ED; color: #fff; font-size: 0.9rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .sidebar-user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-        .sidebar-user-info { min-width: 0; }
-        .sidebar-user-name { font-size: 0.95rem; font-weight: 600; color: #fff; margin: 0; }
-        .sidebar-user-role { font-size: 0.8rem; color: #A0AEC0; margin: 2px 0 0 0; }
-        .account-dropdown { position: absolute; left: 1rem; right: 1rem; bottom: 0; transform: translateY(calc(-100% - 10px)); background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); padding: 6px 0; min-width: 160px; z-index: 1100; display: none; overflow: hidden; }
-        .account-dropdown.open { display: block; animation: account-dropdown-in 0.2s ease; }
-        @keyframes account-dropdown-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(calc(-100% - 10px)); } }
-        .account-dropdown-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: none; background: none; color: #1e293b; font-size: 0.9rem; cursor: pointer; text-align: left; text-decoration: none; font-family: inherit; transition: background 0.15s ease, color 0.15s ease; box-sizing: border-box; }
-        .account-dropdown-item:hover { background: #f1f5f9; }
-        .account-dropdown-item.account-dropdown-profile:hover { background: rgba(59, 130, 246, 0.1); color: #3B82F6; }
-        .account-dropdown-item.account-dropdown-profile:hover svg { color: #3B82F6; }
-        .account-dropdown-item.account-dropdown-signout:hover { background: #dc2626; color: #fff; }
-        .account-dropdown-item.account-dropdown-signout:hover svg { color: #fff; }
-        .account-dropdown-item svg { width: 18px; height: 18px; flex-shrink: 0; color: #64748b; transition: color 0.15s ease; }
-        .account-dropdown-item:hover svg { color: #3B82F6; }
-        .main-content { flex: 1; margin-left: 260px; padding: 0; background: #f8fafc; overflow-x: auto; display: flex; flex-direction: column; }
+        .main-content { background: #f8fafc; }
         .content-header { background: #fff; padding: 1.5rem 2.2rem; border-bottom: 1px solid #e2e8f0; }
         .dashboard-header { display: flex; justify-content: space-between; align-items: center; }
         .dashboard-header h1 { font-size: 1.6rem; margin: 0 0 0.2rem 0; font-weight: 700; color: #1e293b; }
@@ -335,34 +299,8 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
         .profile-link { display: flex; align-items: center; gap: 8px; padding: 10px 12px; text-decoration: none; color: #0b1720; }
         .profile-link svg { width: 16px; height: 16px; flex-shrink: 0; }
         .profile-link:hover { background: #f1f5f9; }
-        .profile-modal-overlay, .settings-modal-overlay { position: fixed; inset: 0; background: rgba(27, 21, 72, 0.5); z-index: 2000; display: none; align-items: center; justify-content: center; padding: 1rem; overflow-y: auto; }
-        .profile-modal-overlay.profile-modal-open, .settings-modal-overlay.settings-modal-open { display: flex; }
-        .profile-modal { background: #fff; border-radius: 16px; box-shadow: 0 24px 48px rgba(27, 21, 72, 0.2); border: 2px solid #D4AF37; width: 50vw; height: 70vh; min-width: 320px; max-width: 50vw; overflow: hidden; margin: auto; display: flex; flex-direction: column; }
-        .profile-modal-header { padding: 1.5rem 1.5rem; border-bottom: 1px solid #e2e8f0; position: relative; }
-        .profile-modal-title { color: #1e293b; font-size: 1.35rem; font-weight: 700; margin: 0 0 0.25rem 0; }
-        .profile-modal-subtitle { font-size: 0.9rem; color: #64748b; margin: 0; }
-        .profile-modal-close-btn { position: absolute; top: 1rem; right: 1rem; width: 32px; height: 32px; border: none; background: transparent; color: #64748b; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s, color 0.15s; }
-        .profile-modal-close-btn:hover { background: #f1f5f9; color: #1e293b; }
-        .profile-modal-close-btn svg { width: 20px; height: 20px; }
-        .profile-modal-body { padding: 1.75rem 1.5rem; overflow-y: auto; flex: 1; min-height: 0; }
-        .profile-info-card { background: #f8fafc; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.25rem; border: 1px solid #e2e8f0; }
-        .profile-info-card h3 { font-size: 0.95rem; font-weight: 700; color: #1e293b; margin: 0 0 0.35rem 0; }
-        .profile-info-card p.profile-info-desc { font-size: 0.8rem; color: #64748b; margin: 0 0 1rem 0; }
-        .profile-info-grid { display: grid; grid-template-columns: auto 1fr; gap: 0.5rem 1.25rem; align-items: start; }
-        .profile-info-avatar { width: 64px; height: 64px; border-radius: 50%; background: #63B3ED; color: #fff; font-size: 1.5rem; font-weight: 700; display: flex; align-items: center; justify-content: center; grid-row: span 4; }
-        .profile-info-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-        .profile-info-label { font-size: 0.7rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
-        .profile-info-value { font-size: 0.95rem; color: #1e293b; font-weight: 500; margin: 0; }
-        .profile-password-card { background: #f8fafc; border-radius: 12px; padding: 1.25rem; margin-bottom: 0; border: 1px solid #e2e8f0; box-sizing: border-box; overflow: hidden; }
-        .profile-password-card h3 { font-size: 0.95rem; font-weight: 700; color: #1e293b; margin: 0 0 0.35rem 0; display: flex; align-items: center; gap: 8px; }
-        .profile-password-card h3 svg { width: 18px; height: 18px; color: #64748b; }
-        .profile-password-card p.profile-info-desc { font-size: 0.8rem; color: #64748b; margin: 0 0 1rem 0; }
-        .profile-password-card .offices-field { margin-bottom: 1rem; }
-        .profile-password-card .offices-field:last-of-type { margin-bottom: 0; }
-        .profile-password-card .offices-field input { width: 100%; height: 42px; padding: 0 12px; border: 1px solid #e2e8f0; border-radius: 8px; font-size: 0.95rem; box-sizing: border-box; max-width: 100%; }
-        .profile-modal-btn-update { width: 100%; padding: 12px 16px; height: auto; min-height: 44px; background: #3B82F6; color: #fff; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px; transition: background 0.15s; box-sizing: border-box; max-width: 100%; }
-        .profile-modal-btn-update:hover { background: #2563eb; color: #fff; }
-        .profile-modal-btn-update svg { width: 18px; height: 18px; flex-shrink: 0; }
+        .settings-modal-overlay { position: fixed; inset: 0; background: rgba(27, 21, 72, 0.5); z-index: 2000; display: none; align-items: center; justify-content: center; padding: 1rem; overflow-y: auto; }
+        .settings-modal-overlay.settings-modal-open { display: flex; }
         .profile-photo-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.25rem; }
         .profile-photo-card h3 { margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b; }
         .profile-photo-card .profile-info-desc { margin: 0 0 1rem 0; font-size: 0.9rem; color: #64748b; }
@@ -409,6 +347,20 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
         .signature-actions .btn-clear { background: #64748b; color: #fff; }
         .signature-actions .btn-clear:hover { background: #475569; color: #fff; }
         .signature-modal-footer { padding: 1rem 1.25rem; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 10px; }
+        .delete-confirm-modal-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); z-index: 2500; display: none; align-items: center; justify-content: center; padding: 1rem; }
+        .delete-confirm-modal-overlay.show { display: flex; }
+        .delete-confirm-modal { background: #fff; border-radius: 12px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); width: 100%; max-width: 420px; overflow: hidden; }
+        .delete-confirm-modal-header { padding: 1.5rem 1.5rem 1rem; text-align: center; }
+        .delete-confirm-modal-icon { width: 64px; height: 64px; margin: 0 auto 1rem; border-radius: 50%; background: #fee2e2; color: #dc2626; display: flex; align-items: center; justify-content: center; }
+        .delete-confirm-modal-icon svg { width: 32px; height: 32px; }
+        .delete-confirm-modal-title { font-size: 1.25rem; font-weight: 700; color: #1e293b; margin: 0 0 0.5rem 0; }
+        .delete-confirm-modal-message { font-size: 0.95rem; color: #64748b; margin: 0; }
+        .delete-confirm-modal-body { padding: 0 1.5rem 1.5rem; }
+        .delete-confirm-modal-footer { padding: 1rem 1.5rem; border-top: 1px solid #e5e7eb; display: flex; gap: 10px; justify-content: flex-end; }
+        .delete-confirm-btn-cancel { padding: 10px 20px; border: 1px solid #e2e8f0; background: #fff; color: #64748b; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; }
+        .delete-confirm-btn-cancel:hover { background: #f8fafc; color: #1e293b; }
+        .delete-confirm-btn-delete { padding: 10px 20px; border: none; background: #dc2626; color: #fff; border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer; }
+        .delete-confirm-btn-delete:hover { background: #b91c1c; color: #fff; }
         .main-content { background: #f1f5f9; }
         .dept-page-header { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1.5rem; }
         .dept-page-title { margin: 0; font-size: 1.75rem; font-weight: 700; color: #1e293b; }
@@ -492,48 +444,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
 </head>
 <body>
     <div class="dashboard-container">
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <div class="sidebar-logo">
-                    <img src="../img/logo.png" alt="LGU Solano">
-                </div>
-                <div class="sidebar-title">
-                    <h2>LGU Solano<span>Document Management</span></h2>
-                </div>
-            </div>
-            <nav class="sidebar-nav">
-                <div class="nav-section-title">Main Menu</div>
-                <ul>
-                    <li><a href="dashboard.php" class="<?php echo $sidebar_active === 'dashboard' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
-                    <li><a href="documents.php" class="<?php echo $sidebar_active === 'documents' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Documents</a></li>
-                    <li><a href="document-history.php" class="<?php echo $sidebar_active === 'document-history' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Document History</a></li>
-                </ul>
-                <div class="nav-section-title">Administration</div>
-                <ul>
-                    <li><a href="users.php" class="<?php echo $sidebar_active === 'users' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>User Management</a></li>
-                    <li><a href="offices-department.php" class="<?php echo $sidebar_active === 'offices' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/><path d="M9 18v.01"/></svg>Departments</a></li>
-                    <li><a href="activitylogs.php" class="<?php echo $sidebar_active === 'activitylogs' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Activity Logs</a></li>
-                    <li><a href="archived.php" class="<?php echo $sidebar_active === 'archived' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archived</a></li>
-                </ul>
-                <div class="nav-section-title">Account</div>
-                <ul>
-                    <li><a href="#" id="sidebar-settings-btn"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
-                </ul>
-            </nav>
-            <div class="sidebar-user-wrap">
-                <div class="sidebar-user" id="sidebar-account-btn" role="button" tabindex="0" aria-label="Account menu" aria-haspopup="true" aria-expanded="false">
-                    <div class="sidebar-user-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
-                    <div class="sidebar-user-info">
-                        <p class="sidebar-user-name"><?php echo htmlspecialchars($userName); ?></p>
-                        <p class="sidebar-user-role"><?php echo htmlspecialchars($userRole); ?></p>
-                    </div>
-                </div>
-                <div class="account-dropdown" id="account-dropdown" role="menu" aria-label="Account menu">
-                    <button type="button" class="account-dropdown-item account-dropdown-profile" id="account-dropdown-profile" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profile</button>
-                    <a href="../index.php?logout=1" class="account-dropdown-item account-dropdown-signout" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Sign Out</a>
-                </div>
-            </div>
-        </div>
+        <?php include __DIR__ . '/_sidebar_super_admin.php'; ?>
 
         <div class="main-content">
             <div class="content-header">
@@ -755,18 +666,34 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                 document.getElementById('modal-assign-head').style.display = 'flex';
             }
             function closeAssignHeadModal() { document.getElementById('modal-assign-head').style.display = 'none'; }
+            var deleteModalOverlay = document.getElementById('delete-confirm-modal-overlay');
+            var deleteConfirmMessage = document.getElementById('delete-confirm-message');
+            var deleteOfficeIdInput = document.getElementById('delete-office-id');
+            var deleteForm = document.getElementById('delete-office-form');
+            var deleteConfirmCancel = document.getElementById('delete-confirm-cancel');
+            var deleteConfirmDelete = document.getElementById('delete-confirm-delete');
+            function openDeleteConfirmModal(id, name) {
+                if (!id || !deleteModalOverlay) return;
+                deleteOfficeIdInput.value = id;
+                deleteConfirmMessage.textContent = 'Are you sure you want to delete "' + (name || 'this department') + '"? This action cannot be undone.';
+                deleteModalOverlay.classList.add('show');
+            }
+            function closeDeleteConfirmModal() {
+                if (deleteModalOverlay) deleteModalOverlay.classList.remove('show');
+            }
+            if (deleteConfirmCancel) deleteConfirmCancel.addEventListener('click', closeDeleteConfirmModal);
+            if (deleteConfirmDelete && deleteForm) deleteConfirmDelete.addEventListener('click', function() {
+                deleteForm.submit();
+            });
+            if (deleteModalOverlay) deleteModalOverlay.addEventListener('click', function(e) {
+                if (e.target === deleteModalOverlay) closeDeleteConfirmModal();
+            });
             function confirmDeleteOffice(btn) {
                 var d = btn.dataset || {};
                 var id = d.id || '';
                 var name = d.name || 'this department';
                 if (!id) return;
-                if (confirm('Are you sure you want to delete "' + name + '"? This action cannot be undone.')) {
-                    var form = document.createElement('form');
-                    form.method = 'post';
-                    form.innerHTML = '<input type="hidden" name="action" value="delete"><input type="hidden" name="office_id" value="' + id + '">';
-                    document.body.appendChild(form);
-                    form.submit();
-                }
+                openDeleteConfirmModal(id, name);
             }
             function toggleCardMenu(menuBtn) {
                 var dropdown = menuBtn.closest('.dept-card-menu').querySelector('.dept-card-dropdown');
@@ -790,52 +717,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                 if (toast) setTimeout(closeDeptToast, 5000);
             })();
             </script>
-    <div class="profile-modal-overlay" id="profile-modal-overlay" aria-hidden="true">
-        <div class="profile-modal" id="profile-modal" role="dialog" aria-labelledby="profile-modal-title">
-            <div class="profile-modal-header">
-                <button type="button" class="profile-modal-close-btn" id="profile-modal-close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>
-                <h2 class="profile-modal-title" id="profile-modal-title">Profile</h2>
-                <p class="profile-modal-subtitle">Your account information and password</p>
-            </div>
-            <div class="profile-modal-body">
-                <div class="profile-info-card">
-                    <h3>Profile Information</h3>
-                    <p class="profile-info-desc">Your account details and role in the system</p>
-                    <div class="profile-info-grid">
-                        <div class="profile-info-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
-                        <span class="profile-info-label">Full Name</span>
-                        <p class="profile-info-value"><?php echo htmlspecialchars($userName); ?></p>
-                        <span class="profile-info-label">Role</span>
-                        <p class="profile-info-value"><?php echo htmlspecialchars($userRole); ?></p>
-                        <span class="profile-info-label">Email</span>
-                        <p class="profile-info-value"><?php echo htmlspecialchars($userEmail); ?></p>
-                        <span class="profile-info-label">Department</span>
-                        <p class="profile-info-value"><?php echo htmlspecialchars($userDepartment); ?></p>
-                    </div>
-                </div>
-                <div class="profile-password-card">
-                    <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;vertical-align:middle;margin-right:6px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Change Password</h3>
-                    <p class="profile-info-desc">Update your account password</p>
-                    <form method="post" id="profile-change-password-form" action="offices-department.php">
-                        <input type="hidden" name="action" value="change_password">
-                        <div class="offices-field">
-                            <label for="profile-current-password">Current Password</label>
-                            <input type="password" name="current_password" id="profile-current-password" placeholder="Enter current password" autocomplete="current-password">
-                        </div>
-                        <div class="offices-field">
-                            <label for="profile-new-password">New Password</label>
-                            <input type="password" name="new_password" id="profile-new-password" placeholder="Enter new password" autocomplete="new-password">
-                        </div>
-                        <div class="offices-field">
-                            <label for="profile-confirm-password">Confirm New Password</label>
-                            <input type="password" name="confirm_password" id="profile-confirm-password" placeholder="Confirm new password" autocomplete="new-password">
-                        </div>
-                        <button type="submit" class="profile-modal-btn-update" style="margin-top:0.75rem;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Update Password</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </div>
+    <?php include __DIR__ . '/_profile_modal_super_admin.php'; ?>
     <div class="settings-modal-overlay" id="settings-modal-overlay" aria-hidden="true">
         <div class="profile-modal" id="settings-modal" role="dialog" aria-labelledby="settings-modal-title">
             <div class="profile-modal-header">
@@ -910,6 +792,26 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
         <input type="hidden" name="action" value="update_photo">
         <input type="hidden" name="photo" id="profile-photo-hidden-input">
     </form>
+    <div class="delete-confirm-modal-overlay" id="delete-confirm-modal-overlay">
+        <div class="delete-confirm-modal">
+            <div class="delete-confirm-modal-header">
+                <div class="delete-confirm-modal-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </div>
+                <h3 class="delete-confirm-modal-title">Delete Department</h3>
+                <p class="delete-confirm-modal-message" id="delete-confirm-message">Are you sure you want to delete this department? This action cannot be undone.</p>
+            </div>
+            <div class="delete-confirm-modal-footer">
+                <button type="button" class="delete-confirm-btn-cancel" id="delete-confirm-cancel">Cancel</button>
+                <button type="button" class="delete-confirm-btn-delete" id="delete-confirm-delete">Delete</button>
+            </div>
+        </div>
+    </div>
+    <form method="post" id="delete-office-form" action="offices-department.php" style="display:none;">
+        <input type="hidden" name="action" value="delete">
+        <input type="hidden" name="office_id" id="delete-office-id">
+    </form>
+<script src="sidebar_super_admin.js"></script>
 <script>
 (function(){
     var notifBtn = document.getElementById('notif-btn');
@@ -919,30 +821,18 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
     document.addEventListener('click', function(){ closeNotif(); });
 })();
 (function(){
-    var accountBtn = document.getElementById('sidebar-account-btn');
-    var accountDropdown = document.getElementById('account-dropdown');
     var profileOverlay = document.getElementById('profile-modal-overlay');
     var profileCloseBtn = document.getElementById('profile-modal-close');
-    var profileTrigger = document.getElementById('account-dropdown-profile');
-    function openProfileModal(){ if (profileOverlay) { profileOverlay.classList.add('profile-modal-open'); profileOverlay.setAttribute('aria-hidden', 'false'); } }
-    function closeProfileModal(){ if (profileOverlay) { profileOverlay.classList.remove('profile-modal-open'); profileOverlay.setAttribute('aria-hidden', 'true'); } }
-    function closeAccountDropdown(){ if (accountDropdown) { accountDropdown.classList.remove('open'); if (accountBtn) accountBtn.setAttribute('aria-expanded', 'false'); } }
-    if (accountBtn && accountDropdown) {
-        accountBtn.addEventListener('click', function(e){ e.stopPropagation(); accountDropdown.classList.toggle('open'); accountBtn.setAttribute('aria-expanded', accountDropdown.classList.contains('open')); });
-        accountBtn.addEventListener('keydown', function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); accountDropdown.classList.add('open'); accountBtn.setAttribute('aria-expanded', 'true'); } });
-        document.addEventListener('click', function(e){ if (!e.target.closest('.sidebar-user-wrap')) closeAccountDropdown(); });
-        document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeAccountDropdown(); });
-    }
-    if (profileTrigger) profileTrigger.addEventListener('click', function(){ closeAccountDropdown(); openProfileModal(); });
-    if (profileCloseBtn) profileCloseBtn.addEventListener('click', closeProfileModal);
-    if (window.location.search.indexOf('open=profile') !== -1) openProfileModal();
     var settingsOverlay = document.getElementById('settings-modal-overlay');
     var settingsCloseBtn = document.getElementById('settings-modal-close');
-    var sidebarSettingsBtn = document.getElementById('sidebar-settings-btn');
-    function openSettingsModal(){ if (settingsOverlay) { settingsOverlay.classList.add('settings-modal-open'); settingsOverlay.setAttribute('aria-hidden', 'false'); } }
+    function closeProfileModal(){ if (profileOverlay) { profileOverlay.classList.remove('profile-modal-open'); profileOverlay.setAttribute('aria-hidden', 'true'); } }
     function closeSettingsModal(){ if (settingsOverlay) { settingsOverlay.classList.remove('settings-modal-open'); settingsOverlay.setAttribute('aria-hidden', 'true'); } }
-    if (sidebarSettingsBtn) sidebarSettingsBtn.addEventListener('click', function(e){ e.preventDefault(); openSettingsModal(); });
+    if (profileCloseBtn) profileCloseBtn.addEventListener('click', closeProfileModal);
     if (settingsCloseBtn) settingsCloseBtn.addEventListener('click', closeSettingsModal);
+    if (profileOverlay) profileOverlay.addEventListener('click', function(e){ if (e.target === profileOverlay) closeProfileModal(); });
+    if (settingsOverlay) settingsOverlay.addEventListener('click', function(e){ if (e.target === settingsOverlay) closeSettingsModal(); });
+    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') { closeProfileModal(); closeSettingsModal(); } });
+    if (window.location.search.indexOf('open=profile') !== -1 && profileOverlay) profileOverlay.classList.add('profile-modal-open');
 })();
 (function(){
     var settingsOverlay = document.getElementById('settings-modal-overlay');
