@@ -1,0 +1,395 @@
+<?php
+session_start();
+
+$role = $_SESSION['user_role'] ?? '';
+if (!isset($_SESSION['user_id']) || !in_array($role, ['admin', 'staff', 'departmenthead', 'department_head', 'dept_head'])) {
+    header('Location: ../index.php');
+    exit;
+}
+
+$userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
+$userEmail = $_SESSION['user_email'] ?? '';
+$userRole = $_SESSION['user_role'] ?? 'Admin';
+$userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
+$sidebar_active = 'settings';
+
+$config = require __DIR__ . '/../config.php';
+require_once __DIR__ . '/../Super Admin Side/_account_helpers.php';
+
+$flash = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+    if ($action === 'update_signature' && !empty($_SESSION['user_id']) && isset($_POST['signature'])) {
+        $flash = updateUserSignature($_SESSION['user_id'], $_POST['signature']);
+    } elseif ($action === 'update_photo' && !empty($_SESSION['user_id']) && isset($_POST['photo'])) {
+        $flash = updateUserPhoto($_SESSION['user_id'], $_POST['photo']);
+    }
+    if ($flash) {
+        header('Location: admin_settings.php?msg=' . urlencode($flash['message']) . '&ok=' . ($flash['success'] ? '1' : '0'));
+        exit;
+    }
+}
+
+$msg = $_GET['msg'] ?? null;
+$msgOk = isset($_GET['ok']) && $_GET['ok'] === '1';
+$userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'] : getUserSignature($_SESSION['user_id'] ?? '');
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Admin – Settings</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="admin-dashboard.css">
+    <link rel="stylesheet" href="admin-offices.css">
+    <style>
+    body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+    .dashboard-container { display: flex; min-height: 100vh; border-top: 3px solid #D4AF37; }
+    .sidebar { width: 260px; height: 100vh; position: fixed; left: 0; top: 0; z-index: 100; background: #1A202C; color: #fff; display: flex; flex-direction: column; box-shadow: 2px 0 12px rgba(0,0,0,0.08); border-right: 1px solid rgba(255, 255, 255, 0.06); }
+    .sidebar-header { padding: 1.25rem 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; flex-direction: row; align-items: center; gap: 0.75rem; text-align: left; }
+    .sidebar-logo { flex-shrink: 0; width: 44px; height: 44px; background: #63B3ED; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+    .sidebar-logo img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; }
+    .sidebar-header .sidebar-title { text-align: left; }
+    .sidebar-header .sidebar-title h2 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #fff; line-height: 1.3; text-transform: none; letter-spacing: 0.02em; }
+    .sidebar-header .sidebar-title h2 span { font-size: 0.75rem; font-weight: 500; display: block; color: #A0AEC0; margin-top: 2px; letter-spacing: 0.02em; }
+    .sidebar-nav { flex: 1; padding: 1rem 0.75rem; overflow-y: auto; }
+    .sidebar-nav .nav-section-title { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; color: #718096; padding: 0.75rem 0.75rem 0.35rem; text-transform: uppercase; }
+    .sidebar-nav ul { list-style: none; padding: 0; margin: 0; }
+    .sidebar-nav li { margin: 0.2rem 0; }
+    .sidebar-nav a { display: flex; align-items: center; gap: 10px; padding: 0.6rem 0.75rem; color: #fff; text-decoration: none; font-size: 0.95rem; font-weight: 500; border-radius: 8px; transition: background 0.15s ease, color 0.15s ease; letter-spacing: 0.02em; }
+    .sidebar-nav a .nav-icon { width: 22px; height: 22px; flex-shrink: 0; color: #A0AEC0; transition: color 0.15s ease; }
+    .sidebar-nav a:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
+    .sidebar-nav a:hover .nav-icon { color: #fff; }
+    .sidebar-nav a.active { background: #3B82F6; color: #fff; }
+    .sidebar-nav a.active .nav-icon { color: #fff; }
+    .sidebar-user-wrap { position: relative; padding: 0 1rem 1.25rem 1rem; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+    .sidebar-user { padding: 0.75rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; cursor: pointer; transition: background 0.2s ease, transform 0.2s ease; }
+    .sidebar-user:hover { background: rgba(255, 255, 255, 0.08); }
+    .sidebar-user:active { transform: scale(0.98); }
+    .sidebar-user-avatar { width: 40px; height: 40px; border-radius: 50%; background: #63B3ED; color: #fff; font-size: 0.9rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    .sidebar-user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+    .sidebar-user-info { min-width: 0; }
+    .sidebar-user-name { font-size: 0.95rem; font-weight: 600; color: #fff; margin: 0; }
+    .sidebar-user-role { font-size: 0.8rem; color: #A0AEC0; margin: 2px 0 0 0; }
+    .account-dropdown { position: absolute; left: 1rem; right: 1rem; bottom: 0; transform: translateY(calc(-100% - 10px)); background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); padding: 6px 0; min-width: 160px; z-index: 1100; display: none; overflow: hidden; }
+    .account-dropdown.open { display: block; animation: account-dropdown-in 0.2s ease; }
+    @keyframes account-dropdown-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(calc(-100% - 10px)); } }
+    .account-dropdown-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: none; background: none; color: #1e293b; font-size: 0.9rem; cursor: pointer; text-align: left; text-decoration: none; font-family: inherit; transition: background 0.15s ease, color 0.15s ease; box-sizing: border-box; }
+    .account-dropdown-item:hover { background: #f1f5f9; }
+    .account-dropdown-item.account-dropdown-profile:hover { background: rgba(59, 130, 246, 0.1); color: #3B82F6; }
+    .account-dropdown-item.account-dropdown-profile:hover svg { color: #3B82F6; }
+    .account-dropdown-item.account-dropdown-signout:hover { background: #dc2626; color: #fff; }
+    .account-dropdown-item.account-dropdown-signout:hover svg { color: #fff; }
+    .account-dropdown-item svg { width: 18px; height: 18px; flex-shrink: 0; color: #64748b; transition: color 0.15s ease; }
+    .account-dropdown-item:hover svg { color: #3B82F6; }
+    .main-content { flex: 1; margin-left: 260px; padding: 0; background: #f1f5f9; overflow-x: auto; display: flex; flex-direction: column; }
+    .content-header { background: #fff; padding: 1.5rem 2.2rem; border-bottom: 1px solid #e2e8f0; }
+    .dashboard-header { display: flex; justify-content: space-between; align-items: center; }
+    .header-controls { position: relative; }
+    .icon-btn { background: #f1f5f9; border: none; color: #475569; padding: 0; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; position: relative; width: 40px; height: 40px; }
+    .icon-btn:hover { background: #e2e8f0; color: #1e293b; }
+    .icon-btn svg { width: 22px; height: 22px; }
+    .notif-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 180px; border-radius: 6px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 8px 0; }
+    .notif-item { padding: 10px 12px; font-size: 0.95rem; color: #475569; }
+    .dept-page-title { margin: 0; font-size: 1.75rem; font-weight: 700; color: #1e293b; }
+    .dept-page-subtitle { margin: 0.25rem 0 0 0; font-size: 0.95rem; color: #64748b; }
+    .content-body { padding: 2rem 2.2rem; }
+    .settings-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.25rem; margin-bottom: 1.25rem; }
+    .settings-card h3 { margin: 0 0 0.25rem 0; font-size: 1.1rem; font-weight: 700; color: #1e293b; display: flex; align-items: center; gap: 8px; }
+    .settings-card h3 svg { width: 20px; height: 20px; color: #3B82F6; flex-shrink: 0; }
+    .settings-card .card-desc { margin: 0 0 1rem 0; font-size: 0.9rem; color: #64748b; }
+    .profile-photo-row { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
+    .profile-photo-avatar { width: 80px; height: 80px; border-radius: 50%; background: #63B3ED; color: #fff; font-size: 2rem; font-weight: 700; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0; }
+    .profile-photo-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .profile-signature-btn { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px; background: #2563eb; color: #fff; border: none; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; transition: background 0.2s ease; }
+    .profile-signature-btn:hover { background: #1d4ed8; color: #fff; }
+    .profile-signature-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+    .signature-current-label { font-size: 0.8rem; font-weight: 600; color: #64748b; margin-bottom: 0.5rem; display: block; }
+    .signature-box { max-width: 320px; height: 120px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .signature-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+    .signature-box.empty { color: #94a3b8; font-size: 0.9rem; }
+    .settings-toast { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 1500; display: flex; align-items: center; gap: 12px; padding: 0.875rem 1rem; border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.15); max-width: 360px; }
+    .settings-toast.success { background: #22c55e; color: #fff; }
+    .settings-toast.error { background: #ef4444; color: #fff; }
+    .signature-modal-overlay { position: fixed; inset: 0; z-index: 300; display: none; align-items: center; justify-content: center; padding: 1rem; background: rgba(0,0,0,0.4); }
+    .signature-modal-overlay.signature-modal-open { display: flex; }
+    .signature-modal { background: #fff; border-radius: 12px; width: 100%; max-width: 480px; max-height: 90vh; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 20px 40px rgba(0,0,0,0.2); }
+    .signature-modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; justify-content: space-between; }
+    .signature-modal-header h3 { margin: 0; font-size: 1.2rem; font-weight: 700; color: #1e293b; }
+    .signature-modal-close { width: 36px; height: 36px; border: none; background: transparent; color: #64748b; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+    .signature-modal-close:hover { background: #f1f5f9; color: #1e293b; }
+    .signature-tabs { display: flex; border-bottom: 1px solid #e5e7eb; padding: 0 1rem; }
+    .signature-tab { padding: 12px 20px; border: none; background: none; font-size: 0.95rem; font-weight: 500; color: #64748b; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; font-family: inherit; }
+    .signature-tab.active { color: #3B82F6; border-bottom-color: #3B82F6; }
+    .signature-modal-body { padding: 1.25rem; overflow-y: auto; flex: 1; min-height: 0; }
+    .signature-pane { display: none; }
+    .signature-pane.active { display: block; }
+    .signature-upload-zone { border: 2px dashed #cbd5e1; border-radius: 10px; padding: 2rem; text-align: center; background: #f8fafc; cursor: pointer; }
+    .signature-upload-zone:hover, .signature-upload-zone.dragover { border-color: #3B82F6; background: rgba(59,130,246,0.05); }
+    .signature-upload-zone input[type="file"] { display: none; }
+    .signature-upload-preview { max-width: 100%; max-height: 180px; margin-top: 1rem; display: none; }
+    .signature-upload-preview.show { display: block; }
+    .signature-canvas-wrap { border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
+    #signature-pad { display: block; width: 100%; height: 200px; cursor: crosshair; touch-action: none; }
+    .signature-actions { margin-top: 1rem; }
+    .signature-actions .btn-clear { height: 42px; padding: 0 16px; border: none; border-radius: 10px; background: #64748b; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit; }
+    .signature-actions .btn-clear:hover { background: #475569; color: #fff; }
+    .signature-modal-footer { padding: 1rem 1.25rem; border-top: 1px solid #e5e7eb; display: flex; justify-content: flex-end; gap: 10px; }
+    .offices-btn { height: 42px; padding: 0 16px; border: none; border-radius: 10px; background: #2563eb; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-family: inherit; transition: background 0.2s ease; }
+    .offices-btn:hover { background: #1d4ed8; color: #fff; }
+    .offices-btn-secondary { background: #f1f5f9; color: #475569; }
+    .offices-btn-secondary:hover { background: #e2e8f0; color: #1e293b; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-logo">
+                    <img src="../img/logo.png" alt="LGU Solano">
+                </div>
+                <div class="sidebar-title">
+                    <h2>LGU Solano<span>Document Management</span></h2>
+                </div>
+            </div>
+            <nav class="sidebar-nav">
+                <div class="nav-section-title">Main Menu</div>
+                <ul>
+                    <li><a href="admin_dashboard.php" class="<?php echo $sidebar_active === 'dashboard' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
+                    <li><a href="documents.php" class="<?php echo $sidebar_active === 'documents' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Documents</a></li>
+                    <li><a href="admin_offices.php" class="<?php echo $sidebar_active === 'offices' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/><path d="M9 18v.01"/></svg>Departments</a></li>
+                    <li><a href="document_history.php" class="<?php echo $sidebar_active === 'document-history' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Document History</a></li>
+                </ul>
+                <div class="nav-section-title">Account</div>
+                <ul>
+                    <li><a href="admin_settings.php" class="<?php echo $sidebar_active === 'settings' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
+                </ul>
+            </nav>
+            <div class="sidebar-user-wrap">
+                <div class="sidebar-user" id="sidebar-account-btn" role="button" tabindex="0" aria-label="Account menu" aria-haspopup="true" aria-expanded="false">
+                    <div class="sidebar-user-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
+                    <div class="sidebar-user-info">
+                        <p class="sidebar-user-name"><?php echo htmlspecialchars($userName); ?></p>
+                        <p class="sidebar-user-role"><?php echo htmlspecialchars($userRole); ?></p>
+                    </div>
+                </div>
+                <div class="account-dropdown" id="account-dropdown" role="menu" aria-label="Account menu">
+                    <button type="button" class="account-dropdown-item account-dropdown-profile" id="account-dropdown-profile" role="menuitem" onclick="window.location.href='admin_settings.php'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profile</button>
+                    <a href="../index.php?logout=1" class="account-dropdown-item account-dropdown-signout" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Sign Out</a>
+                </div>
+            </div>
+        </aside>
+
+        <div class="main-content">
+            <div class="content-header">
+                <div class="dashboard-header">
+                    <div style="flex: 1; margin-bottom: 0;">
+                        <h1 class="dept-page-title">Settings</h1>
+                        <p class="dept-page-subtitle">E-signature and profile photo</p>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <div class="header-controls">
+                            <button class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                                <span class="notif-badge" id="notif-count" aria-hidden="true" style="display:none;">0</span>
+                            </button>
+                            <div class="notif-dropdown" id="notif-dropdown" aria-hidden="true">
+                                <div class="notif-item">No new notifications</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="content-body">
+                <?php if ($msg !== null): ?>
+                <div id="settings-toast" class="settings-toast <?= $msgOk ? 'success' : 'error' ?>" role="alert"><?= htmlspecialchars($msg) ?></div>
+                <?php endif; ?>
+
+                <div class="settings-card">
+                    <h3>Profile Photo</h3>
+                    <p class="card-desc">Your avatar shown in the sidebar and across the app</p>
+                    <div class="profile-photo-row">
+                        <div class="profile-photo-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?= htmlspecialchars($_SESSION['user_photo']) ?>" alt=""><?php else: ?><?= htmlspecialchars($userInitial) ?><?php endif; ?></div>
+                        <div>
+                            <label class="profile-signature-btn" for="profile-photo-file-input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Upload Photo</label>
+                            <input type="file" id="profile-photo-file-input" accept="image/png,image/jpeg,image/jpg,image/gif" style="display:none;">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-card">
+                    <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>E-Signature</h3>
+                    <p class="card-desc">Your digital signature for document approvals</p>
+                    <span class="signature-current-label">Current Signature:</span>
+                    <div class="signature-box <?= $userSignature === '' ? 'empty' : '' ?>">
+                        <?php if ($userSignature !== ''): ?><img src="<?= htmlspecialchars($userSignature) ?>" alt="Your signature"><?php else: ?><span>No signature set</span><?php endif; ?>
+                    </div>
+                    <button type="button" class="profile-signature-btn" id="profile-update-signature-btn" style="margin-top:1rem;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Update Signature</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="signature-modal-overlay" id="signature-modal-overlay">
+        <div class="signature-modal">
+            <div class="signature-modal-header">
+                <h3>Update Signature</h3>
+                <button type="button" class="signature-modal-close" id="signature-modal-close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>
+            </div>
+            <div class="signature-tabs">
+                <button type="button" class="signature-tab active" data-pane="upload">Upload Picture</button>
+                <button type="button" class="signature-tab" data-pane="draw">Draw Signature</button>
+            </div>
+            <div class="signature-modal-body">
+                <div class="signature-pane active" id="signature-pane-upload">
+                    <label class="signature-upload-zone" id="signature-upload-zone" for="signature-file-input">
+                        <span>Click or drag an image here (PNG, JPG)</span>
+                        <input type="file" id="signature-file-input" accept="image/png,image/jpeg,image/jpg,image/gif">
+                        <img class="signature-upload-preview" id="signature-upload-preview" alt="Preview">
+                    </label>
+                </div>
+                <div class="signature-pane" id="signature-pane-draw">
+                    <div class="signature-canvas-wrap">
+                        <canvas id="signature-pad" width="428" height="200"></canvas>
+                    </div>
+                    <div class="signature-actions">
+                        <button type="button" class="profile-signature-btn btn-clear" id="signature-clear-btn">Clear</button>
+                    </div>
+                </div>
+            </div>
+            <div class="signature-modal-footer">
+                <button type="button" class="offices-btn offices-btn-secondary" id="signature-modal-cancel">Cancel</button>
+                <button type="button" class="offices-btn" id="signature-save-btn">Save Signature</button>
+            </div>
+        </div>
+    </div>
+    <form method="post" id="signature-update-form" action="admin_settings.php" style="display:none;">
+        <input type="hidden" name="action" value="update_signature">
+        <input type="hidden" name="signature" id="signature-hidden-input">
+    </form>
+    <form method="post" id="profile-photo-form" action="admin_settings.php" style="display:none;">
+        <input type="hidden" name="action" value="update_photo">
+        <input type="hidden" name="photo" id="profile-photo-hidden-input">
+    </form>
+
+    <script>
+    (function(){
+        var accountBtn = document.getElementById('sidebar-account-btn');
+        var accountDropdown = document.getElementById('account-dropdown');
+        if (accountBtn && accountDropdown) {
+            accountBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var open = !accountDropdown.classList.contains('open');
+                accountDropdown.classList.toggle('open', open);
+                accountBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+            document.addEventListener('click', function() {
+                accountDropdown.classList.remove('open');
+                accountBtn.setAttribute('aria-expanded', 'false');
+            });
+            accountDropdown.addEventListener('click', function(e) { e.stopPropagation(); });
+        }
+        var notifBtn = document.getElementById('notif-btn');
+        var notifDropdown = document.getElementById('notif-dropdown');
+        if (notifBtn && notifDropdown) {
+            notifBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var showing = notifDropdown.style.display === 'block';
+                document.querySelectorAll('.notif-dropdown').forEach(function(el) { el.style.display = 'none'; });
+                if (!showing) notifDropdown.style.display = 'block';
+            });
+            document.addEventListener('click', function() { if (notifDropdown) notifDropdown.style.display = 'none'; });
+        }
+    })();
+    (function(){
+        var toast = document.getElementById('settings-toast');
+        if (toast) setTimeout(function(){ toast.remove(); }, 5000);
+    })();
+    (function(){
+        var overlay = document.getElementById('signature-modal-overlay');
+        var openBtn = document.getElementById('profile-update-signature-btn');
+        var closeBtn = document.getElementById('signature-modal-close');
+        var cancelBtn = document.getElementById('signature-modal-cancel');
+        var tabs = document.querySelectorAll('.signature-tab');
+        var paneUpload = document.getElementById('signature-pane-upload');
+        var paneDraw = document.getElementById('signature-pane-draw');
+        var fileInput = document.getElementById('signature-file-input');
+        var uploadZone = document.getElementById('signature-upload-zone');
+        var uploadPreview = document.getElementById('signature-upload-preview');
+        var canvas = document.getElementById('signature-pad');
+        var clearBtn = document.getElementById('signature-clear-btn');
+        var saveBtn = document.getElementById('signature-save-btn');
+        var form = document.getElementById('signature-update-form');
+        var hiddenInput = document.getElementById('signature-hidden-input');
+        var currentSignatureData = '';
+
+        function openSignatureModal() {
+            currentSignatureData = '';
+            if (uploadPreview) { uploadPreview.src = ''; uploadPreview.classList.remove('show'); }
+            if (fileInput) fileInput.value = '';
+            if (canvas) { var ctx = canvas.getContext('2d'); if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height); }
+            tabs.forEach(function(t){ t.classList.toggle('active', t.getAttribute('data-pane') === 'upload'); });
+            if (paneUpload) paneUpload.classList.add('active');
+            if (paneDraw) paneDraw.classList.remove('active');
+            if (overlay) overlay.classList.add('signature-modal-open');
+        }
+        function closeSignatureModal() {
+            if (overlay) overlay.classList.remove('signature-modal-open');
+        }
+        if (openBtn) openBtn.addEventListener('click', openSignatureModal);
+        if (closeBtn) closeBtn.addEventListener('click', closeSignatureModal);
+        if (cancelBtn) cancelBtn.addEventListener('click', closeSignatureModal);
+        if (overlay) overlay.addEventListener('click', function(e){ if (e.target === overlay) closeSignatureModal(); });
+
+        tabs.forEach(function(tab){
+            tab.addEventListener('click', function(){
+                var pane = tab.getAttribute('data-pane');
+                tabs.forEach(function(t){ t.classList.toggle('active', t.getAttribute('data-pane') === pane); });
+                if (paneUpload) paneUpload.classList.toggle('active', pane === 'upload');
+                if (paneDraw) paneDraw.classList.toggle('active', pane === 'draw');
+            });
+        });
+
+        function setSignatureFromDataUrl(dataUrl) { currentSignatureData = dataUrl || ''; }
+        if (uploadZone && fileInput) {
+            uploadZone.addEventListener('click', function(e){ if (e.target !== fileInput) fileInput.click(); });
+            uploadZone.addEventListener('dragover', function(e){ e.preventDefault(); uploadZone.classList.add('dragover'); });
+            uploadZone.addEventListener('dragleave', function(){ uploadZone.classList.remove('dragover'); });
+            uploadZone.addEventListener('drop', function(e){ e.preventDefault(); uploadZone.classList.remove('dragover'); if (e.dataTransfer.files.length && e.dataTransfer.files[0].type.indexOf('image/') === 0) { var r = new FileReader(); r.onload = function(){ setSignatureFromDataUrl(r.result); uploadPreview.src = r.result; uploadPreview.classList.add('show'); }; r.readAsDataURL(e.dataTransfer.files[0]); } });
+            fileInput.addEventListener('change', function(){ if (fileInput.files.length) { var r = new FileReader(); r.onload = function(){ setSignatureFromDataUrl(r.result); uploadPreview.src = r.result; uploadPreview.classList.add('show'); }; r.readAsDataURL(fileInput.files[0]); } });
+        }
+        if (canvas) {
+            var ctx = canvas.getContext('2d');
+            var drawing = false;
+            function getPos(e){ var rect = canvas.getBoundingClientRect(); var scaleX = canvas.width/rect.width, scaleY = canvas.height/rect.height; var x = e.touches ? e.touches[0].clientX : e.clientX; var y = e.touches ? e.touches[0].clientY : e.clientY; return { x: (x - rect.left)*scaleX, y: (y - rect.top)*scaleY }; }
+            function start(e){ e.preventDefault(); drawing = true; var p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); }
+            function move(e){ e.preventDefault(); if (!drawing) return; var p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); }
+            function end(e){ e.preventDefault(); drawing = false; setSignatureFromDataUrl(canvas.toDataURL('image/png')); }
+            ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+            canvas.addEventListener('mousedown', start); canvas.addEventListener('mousemove', move); canvas.addEventListener('mouseup', end); canvas.addEventListener('mouseleave', end);
+            canvas.addEventListener('touchstart', start, { passive: false }); canvas.addEventListener('touchmove', move, { passive: false }); canvas.addEventListener('touchend', end, { passive: false });
+        }
+        if (clearBtn && canvas) clearBtn.addEventListener('click', function(){ canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height); setSignatureFromDataUrl(''); });
+        if (saveBtn && form && hiddenInput) saveBtn.addEventListener('click', function(){
+            var data = (paneDraw && paneDraw.classList.contains('active') && canvas) ? canvas.toDataURL('image/png') : currentSignatureData;
+            if (!data) { alert('Please upload an image or draw your signature.'); return; }
+            hiddenInput.value = data;
+            form.submit();
+        });
+    })();
+    (function(){
+        var fileInput = document.getElementById('profile-photo-file-input');
+        var form = document.getElementById('profile-photo-form');
+        var hiddenInput = document.getElementById('profile-photo-hidden-input');
+        if (fileInput && form && hiddenInput) fileInput.addEventListener('change', function(){
+            if (!fileInput.files || !fileInput.files.length) return;
+            if (fileInput.files[0].type.indexOf('image/') !== 0) { alert('Please choose an image file.'); return; }
+            var r = new FileReader();
+            r.onload = function(){ hiddenInput.value = r.result; form.submit(); };
+            r.readAsDataURL(fileInput.files[0]);
+        });
+    })();
+    </script>
+</body>
+</html>

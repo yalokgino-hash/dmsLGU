@@ -2,6 +2,7 @@
 session_start();
 
 $config = require __DIR__ . '/../config.php';
+$namespace = $config['database'] . '.' . ($config['collection'] ?? 'offices');
 
 $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
 $userEmail = $_SESSION['user_email'] ?? '';
@@ -20,15 +21,18 @@ function isAdminSide() {
     return isset($_SESSION['user_id']) && in_array($role, $allowedRoles);
 }
 
+$namespace = null;
+
 /**
- * Fetch all offices from the database.
- * @return array List of offices with office_code and office_name
+ * Fetch all offices from the database (full documents for list/cards).
+ * @return array List of offices with id, office_code, office_name, office_head, office_head_id, description, created_at
  */
 function getOffices($config) {
+    global $namespace;
+    $namespace = $namespace ?? ($config['database'] . '.' . ($config['collection'] ?? 'offices'));
     try {
         $manager = new MongoDB\Driver\Manager($config['uri']);
-        $query = new MongoDB\Driver\Query([]);
-        $namespace = $config['database'] . '.' . $config['collection'];
+        $query = new MongoDB\Driver\Query([], ['sort' => ['office_name' => 1]]);
         $cursor = $manager->executeQuery($namespace, $query);
         $docs = $cursor->toArray();
         $offices = [];
@@ -38,9 +42,35 @@ function getOffices($config) {
                 'id' => (string) ($d['_id'] ?? ''),
                 'office_code' => $d['office_code'] ?? $d['code'] ?? '',
                 'office_name' => $d['office_name'] ?? $d['department'] ?? $d['name'] ?? '',
+                'office_head' => $d['office_head'] ?? '',
+                'office_head_id' => $d['office_head_id'] ?? '',
+                'description' => $d['description'] ?? '',
+                'created_at' => $d['created_at'] ?? null,
             ];
         }
         return $offices;
+    } catch (Exception $e) {
+        return [];
+    }
+}
+
+/**
+ * Fetch all user accounts for Assign Head dropdown.
+ * @return array List of users with _id (string), username, name, email
+ */
+function getUsers($config) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $usersNs = $config['database'] . '.users';
+        $query = new MongoDB\Driver\Query([], ['sort' => ['username' => 1]]);
+        $cursor = $manager->executeQuery($usersNs, $query);
+        $rows = [];
+        foreach ($cursor as $doc) {
+            $arr = (array) $doc;
+            $arr['_id'] = (string) ($arr['_id'] ?? '');
+            $rows[] = $arr;
+        }
+        return $rows;
     } catch (Exception $e) {
         return [];
     }
@@ -52,11 +82,17 @@ function getOffices($config) {
  * @param string $id Office MongoDB _id
  * @param string $officeCode Office code
  * @param string $officeName Office name
+ * @param string $officeHead Department head display name
+ * @param string $description Description
  * @return array ['success' => bool, 'error' => string|null]
  */
-function updateOffice($config, $id, $officeCode, $officeName) {
+function updateOffice($config, $id, $officeCode, $officeName, $officeHead = '', $description = '') {
+    global $namespace;
+    $namespace = $namespace ?? ($config['database'] . '.' . ($config['collection'] ?? 'offices'));
     $officeCode = trim($officeCode);
     $officeName = trim($officeName);
+    $officeHead = trim($officeHead);
+    $description = trim($description);
     if ($id === '' || $officeCode === '' || $officeName === '') {
         return ['success' => false, 'error' => 'Department ID, code and name are required.'];
     }
@@ -65,9 +101,15 @@ function updateOffice($config, $id, $officeCode, $officeName) {
         $bulk = new MongoDB\Driver\BulkWrite;
         $bulk->update(
             ['_id' => new MongoDB\BSON\ObjectId($id)],
-            ['$set' => ['office_code' => $officeCode, 'office_name' => $officeName]]
+            ['$set' => [
+                'office_code' => $officeCode,
+                'office_name' => $officeName,
+                'office_head' => $officeHead,
+                'description' => $description,
+                'updated_at' => new MongoDB\BSON\UTCDateTime(),
+            ]],
+            ['multi' => false]
         );
-        $namespace = $config['database'] . '.' . $config['collection'];
         $manager->executeBulkWrite($namespace, $bulk);
         return ['success' => true, 'error' => null];
     } catch (Exception $e) {
@@ -80,11 +122,17 @@ function updateOffice($config, $id, $officeCode, $officeName) {
  * @param array $config Database config
  * @param string $officeCode Office code
  * @param string $officeName Office name
+ * @param string $officeHead Department head (optional)
+ * @param string $description Description (optional)
  * @return array ['success' => bool, 'error' => string|null]
  */
-function addOffice($config, $officeCode, $officeName) {
+function addOffice($config, $officeCode, $officeName, $officeHead = '', $description = '') {
+    global $namespace;
+    $namespace = $namespace ?? ($config['database'] . '.' . ($config['collection'] ?? 'offices'));
     $officeCode = trim($officeCode);
     $officeName = trim($officeName);
+    $officeHead = trim($officeHead);
+    $description = trim($description);
     if ($officeCode === '' || $officeName === '') {
         return ['success' => false, 'error' => 'Department code and name are required.'];
     }
@@ -94,8 +142,82 @@ function addOffice($config, $officeCode, $officeName) {
         $bulk->insert([
             'office_code' => $officeCode,
             'office_name' => $officeName,
+            'office_head' => $officeHead,
+            'description' => $description,
+            'created_at' => new MongoDB\BSON\UTCDateTime(),
         ]);
-        $namespace = $config['database'] . '.' . $config['collection'];
+        $manager->executeBulkWrite($namespace, $bulk);
+        return ['success' => true, 'error' => null];
+    } catch (Exception $e) {
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
+}
+
+/**
+ * Assign or update department head by user account ID.
+ * @param array $config Database config
+ * @param string $id Office MongoDB _id
+ * @param string $officeHeadUserId User _id (empty to clear)
+ * @return array ['success' => bool, 'error' => string|null]
+ */
+function assignHead($config, $id, $officeHeadUserId) {
+    global $namespace;
+    $namespace = $namespace ?? ($config['database'] . '.' . ($config['collection'] ?? 'offices'));
+    if ($id === '') {
+        return ['success' => false, 'error' => 'Invalid department ID.'];
+    }
+    $officeHeadUserId = trim($officeHeadUserId);
+    $officeHead = '';
+    $officeHeadId = null;
+    if ($officeHeadUserId !== '') {
+        try {
+            $usersNs = $config['database'] . '.users';
+            $manager = new MongoDB\Driver\Manager($config['uri']);
+            $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($officeHeadUserId)]);
+            $cursor = $manager->executeQuery($usersNs, $query);
+            $users = $cursor->toArray();
+            if (count($users) > 0) {
+                $u = (array) $users[0];
+                $officeHead = trim($u['username'] ?? $u['name'] ?? $u['email'] ?? '');
+                $officeHeadId = $officeHeadUserId;
+            }
+        } catch (Exception $e) {
+            return ['success' => false, 'error' => 'Invalid user selected.'];
+        }
+    }
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $bulk = new MongoDB\Driver\BulkWrite;
+        $set = ['updated_at' => new MongoDB\BSON\UTCDateTime(), 'office_head' => $officeHead];
+        $set['office_head_id'] = $officeHeadId !== null ? $officeHeadId : '';
+        $bulk->update(
+            ['_id' => new MongoDB\BSON\ObjectId($id)],
+            ['$set' => $set],
+            ['multi' => false]
+        );
+        $manager->executeBulkWrite($namespace, $bulk);
+        return ['success' => true, 'error' => null];
+    } catch (Exception $e) {
+        return ['success' => false, 'error' => $e->getMessage()];
+    }
+}
+
+/**
+ * Delete an office by ID.
+ * @param array $config Database config
+ * @param string $id Office MongoDB _id
+ * @return array ['success' => bool, 'error' => string|null]
+ */
+function deleteOffice($config, $id) {
+    global $namespace;
+    $namespace = $namespace ?? ($config['database'] . '.' . ($config['collection'] ?? 'offices'));
+    if ($id === '') {
+        return ['success' => false, 'error' => 'Invalid office ID.'];
+    }
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $bulk = new MongoDB\Driver\BulkWrite;
+        $bulk->delete(['_id' => new MongoDB\BSON\ObjectId($id)], ['limit' => 1]);
         $manager->executeBulkWrite($namespace, $bulk);
         return ['success' => true, 'error' => null];
     } catch (Exception $e) {
@@ -112,9 +234,19 @@ $addError = '';
 $addSuccess = false;
 $editError = '';
 $editSuccess = false;
+$assignHeadError = '';
+$assignHeadSuccess = false;
+$deleteError = '';
+$deleteSuccess = false;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_office'])) {
-    $result = addOffice($config, $_POST['office_code'] ?? '', $_POST['office_name'] ?? '');
+    $result = addOffice(
+        $config,
+        $_POST['office_code'] ?? '',
+        $_POST['office_name'] ?? '',
+        $_POST['office_head'] ?? '',
+        $_POST['description'] ?? ''
+    );
     if ($result['success']) {
         header('Location: admin_offices.php?added=1');
         exit;
@@ -123,7 +255,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_office'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_office'])) {
-    $result = updateOffice($config, $_POST['office_id'] ?? '', $_POST['office_code'] ?? '', $_POST['office_name'] ?? '');
+    $result = updateOffice(
+        $config,
+        $_POST['office_id'] ?? '',
+        $_POST['office_code'] ?? '',
+        $_POST['office_name'] ?? '',
+        $_POST['office_head'] ?? '',
+        $_POST['description'] ?? ''
+    );
     if ($result['success']) {
         header('Location: admin_offices.php?edited=1');
         exit;
@@ -131,9 +270,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_office'])) {
     $editError = $result['error'];
 }
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_head'])) {
+    $result = assignHead($config, $_POST['office_id'] ?? '', $_POST['office_head_id'] ?? '');
+    if ($result['success']) {
+        header('Location: admin_offices.php?head_assigned=1');
+        exit;
+    }
+    $_SESSION['assign_head_error'] = $result['error'];
+    header('Location: admin_offices.php?assign_error=1');
+    exit;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_office'])) {
+    $result = deleteOffice($config, $_POST['office_id'] ?? '');
+    if ($result['success']) {
+        header('Location: admin_offices.php?deleted=1');
+        exit;
+    }
+    $_SESSION['delete_error'] = $result['error'];
+    header('Location: admin_offices.php?delete_error=1');
+    exit;
+}
+
 $addSuccess = isset($_GET['added']);
 $editSuccess = isset($_GET['edited']);
+$assignHeadSuccess = isset($_GET['head_assigned']);
+$deleteSuccess = isset($_GET['deleted']);
+if (isset($_GET['assign_error']) && isset($_SESSION['assign_head_error'])) {
+    $assignHeadError = $_SESSION['assign_head_error'];
+    unset($_SESSION['assign_head_error']);
+}
+if (isset($_GET['delete_error']) && isset($_SESSION['delete_error'])) {
+    $deleteError = $_SESSION['delete_error'];
+    unset($_SESSION['delete_error']);
+}
 $offices = getOffices($config);
+$usersList = getUsers($config);
 
 $search = trim($_GET['search'] ?? '');
 if ($search !== '') {
@@ -274,7 +446,7 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                 </ul>
                 <div class="nav-section-title">Account</div>
                 <ul>
-                    <li><a href="../Front Desk Side/settings.php"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
+                    <li><a href="admin_settings.php"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
                 </ul>
             </nav>
             <div class="sidebar-user-wrap">
@@ -302,10 +474,6 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-                        <button type="button" class="dept-add-btn" id="open-add-office-modal">
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                            Add Department
-                        </button>
                         <div class="header-controls">
                             <button class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
                                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -335,6 +503,38 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                     <span class="dept-toast-text">Department updated successfully.</span>
                 </div>
                 <?php endif; ?>
+                <?php if ($assignHeadSuccess): ?>
+                <div id="dept-toast-head" class="dept-toast success" role="alert">
+                    <div class="dept-toast-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </div>
+                    <span class="dept-toast-text">Department head assigned successfully.</span>
+                </div>
+                <?php endif; ?>
+                <?php if ($deleteSuccess): ?>
+                <div id="dept-toast-delete" class="dept-toast success" role="alert">
+                    <div class="dept-toast-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                    </div>
+                    <span class="dept-toast-text">Department deleted successfully.</span>
+                </div>
+                <?php endif; ?>
+                <?php if ($assignHeadError): ?>
+                <div id="dept-toast-assign-error" class="dept-toast error" role="alert">
+                    <div class="dept-toast-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                    </div>
+                    <span class="dept-toast-text"><?= htmlspecialchars($assignHeadError) ?></span>
+                </div>
+                <?php endif; ?>
+                <?php if ($deleteError): ?>
+                <div id="dept-toast-delete-error" class="dept-toast error" role="alert">
+                    <div class="dept-toast-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                    </div>
+                    <span class="dept-toast-text"><?= htmlspecialchars($deleteError) ?></span>
+                </div>
+                <?php endif; ?>
 
                 <form method="get" action="admin_offices.php" id="offices-filter-form" class="dept-search-row">
                     <div class="dept-search-wrap">
@@ -345,13 +545,29 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
                         Filter
                     </button>
+                    <div class="dept-search-row-actions">
+                        <button type="button" class="dept-add-btn" id="open-add-office-modal">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                            Add Department
+                        </button>
+                    </div>
                 </form>
 
                 <div class="dept-cards-grid" id="dept-cards-grid">
                     <?php if (empty($officesPage)): ?>
                     <p class="dept-empty" style="grid-column: 1 / -1;"><?= $search !== '' ? 'No departments match your search.' : 'No departments yet. Click &ldquo;Add Department&rdquo; to create one.' ?></p>
                     <?php else: ?>
-                    <?php foreach ($officesPage as $i => $office): ?>
+                    <?php foreach ($officesPage as $i => $office):
+                        $createdAt = $office['created_at'] ?? null;
+                        if ($createdAt instanceof \MongoDB\BSON\UTCDateTime) {
+                            $createdAt = $createdAt->toDateTime()->format('M j, Y');
+                        } else {
+                            $createdAt = is_numeric($createdAt) ? date('M j, Y', (int) $createdAt) : '—';
+                        }
+                        $head = trim($office['office_head'] ?? '');
+                        $desc = trim($office['description'] ?? '');
+                        $descDisplay = $desc !== '' ? $desc : 'Municipal department';
+                    ?>
                     <article class="dept-card" data-office-id="<?= htmlspecialchars($office['id']) ?>">
                         <div class="dept-card-header">
                             <div class="dept-card-header-left">
@@ -368,21 +584,25 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
                                 </button>
                                 <div class="dept-card-dropdown" role="menu">
-                                    <button type="button" class="dept-dropdown-item dept-dropdown-edit" role="menuitem" data-id="<?= htmlspecialchars($office['id']) ?>" data-code="<?= htmlspecialchars($office['office_code']) ?>" data-name="<?= htmlspecialchars($office['office_name']) ?>" onclick="openEditOfficeModal(this); closeCardMenu(this);">
+                                    <button type="button" class="dept-dropdown-item dept-dropdown-edit" role="menuitem" data-id="<?= htmlspecialchars($office['id']) ?>" data-code="<?= htmlspecialchars($office['office_code']) ?>" data-name="<?= htmlspecialchars($office['office_name']) ?>" data-head="<?= htmlspecialchars($office['office_head'] ?? '') ?>" data-desc="<?= htmlspecialchars($desc) ?>" onclick="openEditOfficeModal(this); closeCardMenu(this);">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
                                         Edit Department
+                                    </button>
+                                    <button type="button" class="dept-dropdown-item" role="menuitem" data-id="<?= htmlspecialchars($office['id']) ?>" data-name="<?= htmlspecialchars($office['office_name']) ?>" data-head-id="<?= htmlspecialchars($office['office_head_id'] ?? '') ?>" onclick="openAssignHeadModal(this); closeCardMenu(this);">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                        Assign Head
                                     </button>
                                 </div>
                             </div>
                         </div>
                         <div class="dept-card-content">
-                            <p class="dept-card-desc">Municipal department</p>
+                            <p class="dept-card-desc"><?= htmlspecialchars($descDisplay) ?></p>
                             <div class="dept-card-head-section">
                                 <p class="dept-card-head-label">Department Head</p>
-                                <p class="dept-card-head-value not-assigned">Not assigned</p>
+                                <p class="dept-card-head-value <?= $head === '' ? 'not-assigned' : '' ?>"><?= $head !== '' ? htmlspecialchars($head) : 'Not assigned' ?></p>
                             </div>
                             <div class="dept-card-created-section">
-                                <p class="dept-card-created">Created: —</p>
+                                <p class="dept-card-created">Created: <?= $createdAt ?></p>
                             </div>
                         </div>
                     </article>
@@ -428,7 +648,7 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                     foreach ($offices as $idx => $office): 
                         $modalPage = (int) floor($idx / $modalLimit) + 1;
                     ?>
-                    <li class="offices-list-item" data-office-id="<?= htmlspecialchars($office['id']) ?>" data-office-code="<?= htmlspecialchars($office['office_code']) ?>" data-office-name="<?= htmlspecialchars($office['office_name']) ?>" data-modal-page="<?= $modalPage ?>" style="color:#1e293b;<?= $modalPage > 1 ? ' display:none;' : '' ?>">
+                    <li class="offices-list-item" data-office-id="<?= htmlspecialchars($office['id']) ?>" data-office-code="<?= htmlspecialchars($office['office_code']) ?>" data-office-name="<?= htmlspecialchars($office['office_name']) ?>" data-office-head="<?= htmlspecialchars($office['office_head'] ?? '') ?>" data-office-desc="<?= htmlspecialchars($office['description'] ?? '') ?>" data-modal-page="<?= $modalPage ?>" style="color:#1e293b;<?= $modalPage > 1 ? ' display:none;' : '' ?>">
                         <span class="offices-list-code" style="color:#1e293b;"><?= htmlspecialchars($office['office_code']) ?></span>
                         <span class="offices-list-name" style="color:#475569;"><?= htmlspecialchars($office['office_name']) ?></span>
                         <svg class="offices-list-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#64748b" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
@@ -465,6 +685,11 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                     <label for="edit-office-name">Department Name</label>
                     <input type="text" id="edit-office-name" name="office_name" placeholder="Enter department name" required value="<?= isset($_POST['edit_office'], $_POST['office_name']) ? htmlspecialchars($_POST['office_name']) : '' ?>">
                 </div>
+                <div class="doc-form-field">
+                    <label for="edit-office-desc">Description</label>
+                    <textarea id="edit-office-desc" name="description" rows="3" placeholder="Brief description of the department..."><?= isset($_POST['edit_office'], $_POST['description']) ? htmlspecialchars($_POST['description']) : '' ?></textarea>
+                </div>
+                <input type="hidden" name="office_head" id="edit-office-head" value="<?= isset($_POST['edit_office'], $_POST['office_head']) ? htmlspecialchars($_POST['office_head']) : '' ?>">
                 <p class="doc-form-error" id="edit-office-form-error" <?= $editError ? '' : 'hidden' ?>><?= $editError ? htmlspecialchars($editError) : '' ?></p>
                 <div class="doc-modal-actions">
                     <button type="button" class="doc-btn doc-btn-cancel" data-close-edit-office>Cancel</button>
@@ -491,6 +716,10 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                     <label for="office-name">Department Name</label>
                     <input type="text" id="office-name" name="office_name" placeholder="Enter department name" required value="<?= isset($_POST['office_name']) ? htmlspecialchars($_POST['office_name']) : '' ?>">
                 </div>
+                <div class="doc-form-field">
+                    <label for="office-description">Description</label>
+                    <textarea id="office-description" name="description" rows="3" placeholder="Brief description of the department..."><?= isset($_POST['description']) ? htmlspecialchars($_POST['description']) : '' ?></textarea>
+                </div>
                 <p class="doc-form-error" id="office-form-error" <?= $addError ? '' : 'hidden' ?>><?= $addError ? htmlspecialchars($addError) : '' ?></p>
                 <div class="doc-modal-actions">
                     <button type="button" class="doc-btn doc-btn-cancel" data-close-add-office>Cancel</button>
@@ -499,6 +728,61 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
             </form>
         </div>
     </div>
+
+    <div class="doc-modal" id="assign-head-modal" hidden>
+        <button type="button" class="doc-modal-overlay" data-close-assign-head aria-label="Close"></button>
+        <div class="doc-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="assign-head-title">
+            <div class="doc-modal-header">
+                <h2 id="assign-head-title">Assign Head</h2>
+                <button type="button" class="doc-modal-close" data-close-assign-head aria-label="Close">&times;</button>
+            </div>
+            <form id="assign-head-form" class="doc-modal-form" method="post" action="admin_offices.php">
+                <input type="hidden" name="assign_head" value="1">
+                <input type="hidden" name="office_id" id="assign-office-id" value="">
+                <div class="doc-form-field">
+                    <label>Department</label>
+                    <input type="text" id="assign-office-name" readonly style="background:#f8fafc; color:#64748b;">
+                </div>
+                <div class="doc-form-field">
+                    <label for="assign-office-head">Department Head</label>
+                    <select name="office_head_id" id="assign-office-head" class="doc-form-select">
+                        <option value="">— Select user —</option>
+                        <?php foreach ($usersList as $u):
+                            $username = trim($u['username'] ?? '');
+                            $label = $username !== '' ? $username : (trim($u['name'] ?? '') ?: trim($u['email'] ?? ''));
+                            if ($label === '') $label = (string)($u['_id'] ?? '');
+                        ?>
+                        <option value="<?= htmlspecialchars($u['_id']) ?>"><?= htmlspecialchars($label) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="doc-modal-actions">
+                    <button type="button" class="doc-btn doc-btn-cancel" data-close-assign-head>Cancel</button>
+                    <button type="submit" class="doc-btn doc-btn-save">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="delete-confirm-overlay" id="delete-confirm-modal-overlay" hidden>
+        <div class="delete-confirm-modal">
+            <div class="delete-confirm-header">
+                <div class="delete-confirm-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </div>
+                <h3 class="delete-confirm-title">Delete Department</h3>
+                <p class="delete-confirm-message" id="delete-confirm-message">Are you sure you want to delete this department? This action cannot be undone.</p>
+            </div>
+            <div class="delete-confirm-footer">
+                <button type="button" class="doc-btn doc-btn-cancel" id="delete-confirm-cancel">Cancel</button>
+                <button type="button" class="doc-btn doc-btn-danger" id="delete-confirm-delete">Delete</button>
+            </div>
+        </div>
+    </div>
+    <form method="post" id="delete-office-form" action="admin_offices.php" style="display:none;">
+        <input type="hidden" name="delete_office" value="1">
+        <input type="hidden" name="office_id" id="delete-office-id">
+    </form>
 
     <script>
     (function() {
@@ -552,10 +836,14 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
         if (successToast) {
             setTimeout(function() { successToast.style.display = 'none'; }, 4000);
         }
-        var editToast = document.getElementById('dept-toast-edit');
-        if (editToast && editToast !== successToast) {
-            setTimeout(function() { editToast.style.display = 'none'; }, 4000);
+        var editToastEl = document.getElementById('dept-toast-edit');
+        if (editToastEl && editToastEl !== successToast) {
+            setTimeout(function() { editToastEl.style.display = 'none'; }, 4000);
         }
+        ['dept-toast-head', 'dept-toast-delete', 'dept-toast-assign-error', 'dept-toast-delete-error'].forEach(function(id) {
+            var t = document.getElementById(id);
+            if (t) setTimeout(function() { t.style.display = 'none'; }, 4000);
+        });
 
         var openEditBtn = document.getElementById('open-edit-office-modal');
         var selectOfficeModal = document.getElementById('select-office-modal');
@@ -569,34 +857,43 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
 
         function toggleCardMenu(menuBtn) {
             var dropdown = menuBtn.closest('.dept-card-menu').querySelector('.dept-card-dropdown');
-            var open = dropdown.style.display === 'block';
-            document.querySelectorAll('.dept-card-dropdown').forEach(function(el) { el.style.display = 'none'; });
-            if (!open) dropdown.style.display = 'block';
+            var open = dropdown && dropdown.classList.contains('show');
+            document.querySelectorAll('.dept-card-dropdown').forEach(function(el) { el.classList.remove('show'); });
+            if (dropdown && !open) dropdown.classList.add('show');
         }
 
         function closeCardMenu(insideEl) {
             var dropdown = insideEl.closest('.dept-card-dropdown');
-            if (dropdown) dropdown.style.display = 'none';
+            if (dropdown) dropdown.classList.remove('show');
         }
 
-        function openEditOfficeModal(btnOrId, code, name, clearError) {
-            var id, officeCode, officeName;
+        window.toggleCardMenu = toggleCardMenu;
+        window.closeCardMenu = closeCardMenu;
+
+        function openEditOfficeModal(btnOrId, code, name, clearError, headParam, descParam) {
+            var id, officeCode, officeName, head, desc;
             if (typeof btnOrId === 'object' && btnOrId !== null) {
-                // Called from card menu button
                 var d = btnOrId.dataset || {};
                 id = d.id || '';
                 officeCode = d.code || '';
                 officeName = d.name || '';
+                head = d.head || '';
+                desc = d.desc || '';
                 clearError = true;
             } else {
-                // Called directly with parameters
                 id = btnOrId || '';
                 officeCode = code || '';
                 officeName = name || '';
+                head = headParam || '';
+                desc = descParam || '';
             }
             if (editOfficeId) editOfficeId.value = id;
             if (editOfficeCode) editOfficeCode.value = officeCode;
             if (editOfficeName) editOfficeName.value = officeName;
+            var editHead = document.getElementById('edit-office-head');
+            var editDesc = document.getElementById('edit-office-desc');
+            if (editHead) editHead.value = head || '';
+            if (editDesc) editDesc.value = desc || '';
             if (editOfficeFormError && (clearError !== false)) { editOfficeFormError.hidden = true; editOfficeFormError.textContent = ''; }
             if (editOfficeModal) {
                 editOfficeModal.hidden = false;
@@ -606,8 +903,77 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
 
         document.addEventListener('click', function(e) {
             if (!e.target.closest('.dept-card-menu')) {
-                document.querySelectorAll('.dept-card-dropdown').forEach(function(el) { el.style.display = 'none'; });
+                document.querySelectorAll('.dept-card-dropdown').forEach(function(el) { el.classList.remove('show'); });
             }
+        });
+
+        var assignHeadModal = document.getElementById('assign-head-modal');
+        var assignOfficeId = document.getElementById('assign-office-id');
+        var assignOfficeName = document.getElementById('assign-office-name');
+        var assignOfficeHead = document.getElementById('assign-office-head');
+
+        function openAssignHeadModal(btn) {
+            var d = (btn && btn.dataset) || {};
+            var id = d.id || '';
+            var name = d.name || '';
+            var headId = d.headId || '';
+            if (assignOfficeId) assignOfficeId.value = id;
+            if (assignOfficeName) assignOfficeName.value = name;
+            if (assignOfficeHead) assignOfficeHead.value = headId || '';
+            if (assignHeadModal) {
+                assignHeadModal.hidden = false;
+                document.body.classList.add('modal-open');
+            }
+        }
+
+        function closeAssignHeadModal() {
+            if (assignHeadModal) {
+                assignHeadModal.hidden = true;
+                document.body.classList.remove('modal-open');
+            }
+        }
+
+        window.openEditOfficeModal = openEditOfficeModal;
+        window.openAssignHeadModal = openAssignHeadModal;
+
+        document.querySelectorAll('[data-close-assign-head]').forEach(function(el) {
+            el.addEventListener('click', closeAssignHeadModal);
+        });
+
+        var deleteModalOverlay = document.getElementById('delete-confirm-modal-overlay');
+        var deleteConfirmMessage = document.getElementById('delete-confirm-message');
+        var deleteOfficeIdInput = document.getElementById('delete-office-id');
+        var deleteForm = document.getElementById('delete-office-form');
+        var deleteConfirmCancel = document.getElementById('delete-confirm-cancel');
+        var deleteConfirmDelete = document.getElementById('delete-confirm-delete');
+
+        function openDeleteConfirmModal(id, name) {
+            if (!id || !deleteModalOverlay) return;
+            if (deleteOfficeIdInput) deleteOfficeIdInput.value = id;
+            if (deleteConfirmMessage) deleteConfirmMessage.textContent = 'Are you sure you want to delete "' + (name || 'this department') + '"? This action cannot be undone.';
+            deleteModalOverlay.hidden = false;
+            document.body.classList.add('modal-open');
+        }
+
+        function closeDeleteConfirmModal() {
+            if (deleteModalOverlay) {
+                deleteModalOverlay.hidden = true;
+                document.body.classList.remove('modal-open');
+            }
+        }
+
+        function confirmDeleteOffice(btn) {
+            var d = (btn && btn.dataset) || {};
+            var id = d.id || '';
+            var name = d.name || 'this department';
+            if (!id) return;
+            openDeleteConfirmModal(id, name);
+        }
+
+        if (deleteConfirmCancel) deleteConfirmCancel.addEventListener('click', closeDeleteConfirmModal);
+        if (deleteConfirmDelete && deleteForm) deleteConfirmDelete.addEventListener('click', function() { deleteForm.submit(); });
+        if (deleteModalOverlay) deleteModalOverlay.addEventListener('click', function(e) {
+            if (e.target === deleteModalOverlay) closeDeleteConfirmModal();
         });
 
         var modalCurrentPage = 1;
@@ -688,8 +1054,10 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
             var id = item.getAttribute('data-office-id');
             var code = item.getAttribute('data-office-code');
             var name = item.getAttribute('data-office-name');
+            var head = item.getAttribute('data-office-head') || '';
+            var desc = item.getAttribute('data-office-desc') || '';
             closeSelectOfficeModal();
-            openEditOfficeModal(id, code, name);
+            openEditOfficeModal(id, code, name, true, head, desc);
         });
 
         if (modalPrevBtn) {
@@ -705,7 +1073,11 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
 
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
-                if (editOfficeModal && !editOfficeModal.hidden) {
+                if (deleteModalOverlay && !deleteModalOverlay.hidden) {
+                    closeDeleteConfirmModal();
+                } else if (assignHeadModal && !assignHeadModal.hidden) {
+                    closeAssignHeadModal();
+                } else if (editOfficeModal && !editOfficeModal.hidden) {
                     closeEditOfficeModal();
                 } else if (selectOfficeModal && !selectOfficeModal.hidden) {
                     closeSelectOfficeModal();

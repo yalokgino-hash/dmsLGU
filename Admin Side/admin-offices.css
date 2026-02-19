@@ -395,8 +395,9 @@ body {
 }
 
 .doc-form-field input[type="text"],
-.doc-form-field input[type="file"] {
-    height: 40px;
+.doc-form-field input[type="file"],
+.doc-form-field textarea,
+.doc-form-field .doc-form-select {
     border: 1px solid #e2e8f0;
     border-radius: 10px;
     padding: 0 10px;
@@ -404,6 +405,25 @@ body {
     color: #1e293b;
     background: #fff;
     font-family: inherit;
+}
+
+.doc-form-field input[type="text"],
+.doc-form-field input[type="file"] {
+    height: 40px;
+}
+
+.doc-form-field textarea {
+    min-height: 80px;
+    padding: 10px 12px;
+    resize: vertical;
+}
+
+.doc-form-field .doc-form-select,
+.doc-form-select {
+    height: 40px;
+    cursor: pointer;
+    width: 100%;
+    box-sizing: border-box;
 }
 
 .doc-form-field input[type="file"] {
@@ -454,6 +474,84 @@ body {
 .doc-btn-save:hover {
     background: #1d4ed8;
     color: #fff;
+}
+
+.doc-btn-danger {
+    background: #dc2626;
+    color: #fff;
+}
+
+.doc-btn-danger:hover {
+    background: #b91c1c;
+    color: #fff;
+}
+
+/* Delete confirm modal */
+.delete-confirm-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+
+.delete-confirm-overlay[hidden] {
+    display: none;
+}
+
+.delete-confirm-modal {
+    background: #fff;
+    border-radius: 12px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+    width: 100%;
+    max-width: 420px;
+    overflow: hidden;
+}
+
+.delete-confirm-header {
+    padding: 1.5rem 1.5rem 1rem;
+    text-align: center;
+}
+
+.delete-confirm-icon {
+    width: 64px;
+    height: 64px;
+    margin: 0 auto 1rem;
+    border-radius: 50%;
+    background: #fee2e2;
+    color: #dc2626;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.delete-confirm-icon svg {
+    width: 32px;
+    height: 32px;
+}
+
+.delete-confirm-title {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0 0 0.5rem 0;
+}
+
+.delete-confirm-message {
+    font-size: 0.95rem;
+    color: #64748b;
+    margin: 0;
+}
+
+.delete-confirm-footer {
+    padding: 1rem 1.5rem;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
 }
 
 .offices-toast {
@@ -610,7 +708,7 @@ body.admin-dashboard #select-office-modal .offices-list-name {
     min-height: 320px;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .dept-card:hover {
@@ -735,7 +833,7 @@ body.admin-dashboard #select-office-modal .offices-list-name {
     border: 1px solid #e5e7eb;
     padding: 6px 0;
     min-width: 180px;
-    z-index: 50;
+    z-index: 200;
     display: none;
 }
 
