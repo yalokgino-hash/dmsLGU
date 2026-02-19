@@ -7,11 +7,55 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
+require_once __DIR__ . '/_account_helpers.php';
+
 $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
 $userEmail = $_SESSION['user_email'] ?? '';
 $userRole = $_SESSION['user_role'] ?? 'Super Admin';
 $userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
 $sidebar_active = 'dashboard';
+// Welcome header uses username from DB (stays in sync when updated in database)
+$welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['user_username'] ?? $userName) ?: 'User';
+
+// Fetch document counts and recent docs (same logic as Admin dashboard)
+$totalDocuments = 0;
+$pendingCount = 0;
+$approvedCount = 0;
+$completedCount = 0;
+$recentDocuments = [];
+$statusBreakdown = ['Archived' => 0, 'Pending Admin' => 0, 'Pending Department' => 0];
+try {
+    $config = require dirname(__DIR__) . '/config.php';
+    $manager = new MongoDB\Driver\Manager($config['uri']);
+    $namespace = $config['database'] . '.documents';
+    $query = new MongoDB\Driver\Query([], ['sort' => ['createdAt' => -1], 'limit' => 200]);
+    $cursor = $manager->executeQuery($namespace, $query);
+    $docs = $cursor->toArray();
+    $totalDocuments = count($docs);
+    foreach ($docs as $d) {
+        $arr = (array)$d;
+        $status = isset($arr['status']) ? (string)$arr['status'] : 'Pending';
+        $s = strtolower($status);
+        if (strpos($s, 'pending') !== false) $pendingCount++;
+        elseif (strpos($s, 'approved') !== false) $approvedCount++;
+        elseif (strpos($s, 'completed') !== false) $completedCount++;
+        if (strpos($s, 'archived') !== false) {
+            $statusBreakdown['Archived']++;
+        } elseif (strpos($s, 'admin') !== false) {
+            $statusBreakdown['Pending Admin']++;
+        } else {
+            $statusBreakdown['Pending Department']++;
+        }
+    }
+    $recentDocuments = array_slice(array_map(function($d) { return (array)$d; }, $docs), 0, 5);
+} catch (Exception $e) {
+    $totalDocuments = 0;
+    $pendingCount = 0;
+    $approvedCount = 0;
+    $completedCount = 0;
+    $statusBreakdown = ['Archived' => 0, 'Pending Admin' => 0, 'Pending Department' => 0];
+    $recentDocuments = [];
+}
 
 ?>
 <!DOCTYPE html>
@@ -20,798 +64,237 @@ $sidebar_active = 'dashboard';
     <meta charset="UTF-8">
     <title>DMS LGU – Super Admin Dashboard</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="profile_modal_super_admin.css">
+    <link rel="stylesheet" href="../Admin Side/admin-dashboard.css">
+    <link rel="stylesheet" href="sidebar_super_admin.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <style>
-        /* global & layout */
-        body {
-            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            background: #f8fafc;
-            color: #0f172a;
+        /* Same font as sidebar: Inter for full dashboard consistency */
+        body, .dashboard-container, .main-content {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Open Sans', sans-serif;
         }
-        .dashboard-container {
-            display: flex;
-            min-height: 100vh;
-            border-top: 3px solid #D4AF37;
-        }
-
-        /* ---------- SIDEBAR (LGU Solano style – dark blue-grey, section headers, blue active) ---------- */
-        .sidebar {
-            width: 260px;
-            height: 100vh;
-            position: fixed;
-            left: 0;
-            top: 0;
-            z-index: 100;
-            background: #1A202C;
-            color: #fff;
-            display: flex;
-            flex-direction: column;
-            box-shadow: 2px 0 12px rgba(0,0,0,0.08);
-            flex-shrink: 0;
-            border-right: 1px solid rgba(255, 255, 255, 0.06);
-        }
-        .sidebar-header {
-            padding: 1.25rem 1rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-            display: flex;
-            flex-direction: row;
-            align-items: center;
-            gap: 0.75rem;
-            text-align: left;
-        }
-        .sidebar-logo {
-            flex-shrink: 0;
-            width: 44px;
-            height: 44px;
-            background: #63B3ED;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .sidebar-logo img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            border-radius: 8px;
-        }
-        .sidebar-header .sidebar-title { text-align: left; }
-        .sidebar-header .sidebar-title h2 {
-            margin: 0;
-            font-size: 1.1rem;
-            font-weight: 700;
-            color: #ffffff;
-            line-height: 1.3;
-            text-transform: none;
-            letter-spacing: 0.02em;
-        }
-        .sidebar-header .sidebar-title h2 span {
-            font-size: 0.75rem;
-            font-weight: 500;
-            display: block;
-            color: #A0AEC0;
-            margin-top: 2px;
-            letter-spacing: 0.02em;
-        }
-        .sidebar-nav {
-            flex: 1;
-            padding: 1rem 0.75rem;
-            overflow-y: auto;
-        }
-        .sidebar-nav .nav-section-title {
-            font-size: 0.7rem;
-            font-weight: 600;
-            letter-spacing: 0.08em;
-            color: #718096;
-            padding: 0.75rem 0.75rem 0.35rem;
-            text-transform: uppercase;
-        }
-        .sidebar-nav ul { list-style: none; padding: 0; margin: 0; }
-        .sidebar-nav li { margin: 0.2rem 0; }
-        .sidebar-nav a {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 0.6rem 0.75rem;
-            color: #fff;
-            text-decoration: none;
-            font-size: 0.95rem;
-            font-weight: 500;
-            border-radius: 8px;
-            transition: background 0.15s ease, color 0.15s ease;
-            letter-spacing: 0.02em;
-        }
-        .sidebar-nav a .nav-icon {
-            width: 22px;
-            height: 22px;
-            flex-shrink: 0;
-            color: #A0AEC0;
-            transition: color 0.15s ease;
-        }
-        .sidebar-nav a:hover {
-            background: rgba(255, 255, 255, 0.06);
-            color: #fff;
-        }
-        .sidebar-nav a:hover .nav-icon { color: #fff; }
-        .sidebar-nav a.active {
-            background: #3B82F6;
-            color: #fff;
-        }
-        .sidebar-nav a.active .nav-icon { color: #fff; }
-        .sidebar-user {
-            padding: 1rem 1rem 1.25rem;
-            border-top: 1px solid rgba(255, 255, 255, 0.06);
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-        .sidebar-user-avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: #63B3ED;
-            color: #fff;
-            font-size: 0.9rem;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-shrink: 0;
-        }
-        .sidebar-user-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-        .sidebar-user-info { min-width: 0; }
-        .sidebar-user-name { font-size: 0.95rem; font-weight: 600; color: #fff; margin: 0; }
-        .sidebar-user-role { font-size: 0.8rem; color: #A0AEC0; margin: 2px 0 0 0; }
-        /* ----- main content area (right side) ----- */
-        .main-content {
-            flex: 1;
-            margin-left: 260px;
-            padding: 0;
-            background: #f8fafc;
-            overflow-x: auto;
-            display: flex;
-            flex-direction: column;
-        }
-        
-        /* HEADER (Admin design – white) */
-        .content-header {
-            background: #fff;
-            padding: 1.5rem 2.2rem;
-            border-bottom: 1px solid #e2e8f0;
-        }
-        
-        .dashboard-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .dashboard-header h1 {
-            font-size: 1.6rem;
-            margin: 0 0 0.2rem 0;
-            font-weight: 700;
-            color: #1e293b;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .dashboard-header h1 .welcome-icon {
-            flex-shrink: 0;
-            color: #1b1548;
-        }
-        .dashboard-header small {
-            display: block;
-            color: #64748b;
-            font-size: 0.95rem;
-            margin-top: 6px;
-        }
-        .badge-user {
-            background: rgba(255,255,255,0.15);
-            color: white;
-            padding: 0.4rem 1rem;
-            border-radius: 30px;
-            font-size: 0.85rem;
-            font-weight: 500;
-            display: inline-block;
-            backdrop-filter: blur(4px);
-            border: 1px solid rgba(255,255,255,0.1);
-        }
-        .logout-link {
-            font-size: 0.9rem;
-            color: #fecaca;  /* Light red for better visibility on dark */
-            text-decoration: none;
-            font-weight: 500;
-            margin-left: 0.75rem;
-        }
-        .logout-link:hover {
-            text-decoration: underline;
-            color: white;
-        }
-        
-        .content-body {
-            padding: 1rem 2.2rem 2rem 2.2rem;
-        }
-        
-        .card-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 1.6rem;
-            margin-top: 0;
-        }
-        .card {
-            background: white;
-            border-radius: 16px;
-            padding: 1.6rem 1.5rem;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.03);
-            border: 1px solid #f1f5f9;
-            transition: transform 0.1s ease;
-        }
-        .card:hover {
-            border-color: #dbeafe;
-            box-shadow: 0 8px 18px rgba(0,0,0,0.04);
-        }
-        .card h2 {
-            font-size: 1.2rem;
-            margin-top: 0;
-            margin-bottom: 0.6rem;
-            color: #0b1f33;
-            font-weight: 600;
-        }
-        .card p {
-            font-size: 0.92rem;
-            color: #475569;
-            margin-bottom: 1rem;
-            line-height: 1.5;
-        }
-        .card a {
-            font-size: 0.85rem;
-            color: #2563eb;
-            text-decoration: none;
-            font-weight: 550;
-            display: inline-flex;
-            align-items: center;
-        }
-        .card a:hover {
-            text-decoration: underline;
-        }
-        /* small utilities */
-        .attribution {
-            margin-top: 2.5rem;
-            font-size: 0.75rem;
-            color: #94a3b8;
-            border-top: 1px solid #e2e8f0;
-            padding-top: 1.5rem;
-        }
-        .spacer {
-            margin-top: 1rem;
-        }
-        /* --- Workspace framed panel (matches attached wireframe) --- */
-        .workspace-panel{
-            background: #ffffff;
-            border: 2px solid #0b0b0b; /* strong thin outline like wireframe */
-            border-radius: 4px;
-            padding: 1.25rem;
-            color: #0b1720;
-            max-width: 100%;
-        }
-
-        .workspace-header{
-            display:flex;
-            justify-content:space-between;
-            align-items:flex-start;
-            gap:12px;
-            margin-bottom: 0.6rem;
-        }
-
-        .workspace-title{
-            font-weight:700;
-            text-transform:uppercase;
-            letter-spacing:1px;
-            font-size:0.95rem;
-        }
-
-        .quick-actions-title{
-            margin-top:0.6rem;
-            font-weight:800;
-            text-transform:uppercase;
-            letter-spacing:0.8px;
-            font-size:1.05rem;
-            color:#0b1720;
-            margin-bottom:0.5rem;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .quick-actions-title .quick-actions-icon{
-            flex-shrink: 0;
-            color: #1e293b;
-        }
-
-        .quick-actions{
-            display:flex;
-            gap:0.35rem;
-            flex-wrap:wrap;
-            margin:0.5rem 0 1.25rem 0;
-            align-items:center;
-        }
-
-        .quick-actions a{
-            text-decoration:none;
-            color:#0b1720;
-            font-weight:700;
-            text-transform:uppercase;
-            font-size:0.9rem;
-            letter-spacing:0.9px;
-        }
-
-        /* Quick Actions + Date/Time on same row */
-        .quick-actions-row{
-            display:flex;
-            justify-content:space-between;
-            align-items:center;
-            flex-wrap:wrap;
-            gap:1rem;
-            margin-bottom:1rem;
-        }
-        .quick-actions-section{ margin-bottom:0; }
-        .btn-quick{
-            display:inline-flex;
-            align-items:center;
-            gap:6px;
-            padding:12px 20px;
-            border-radius:10px;
-            color: #fff !important;
-            text-decoration:none;
-            font-weight:600;
-            font-size:0.95rem;
-            letter-spacing:0.05em;
-            border: none;
-            box-shadow: none;
-            transition: opacity 0.15s ease, transform 0.1s ease;
-            min-width:70px;
-            justify-content:center;
-            white-space:nowrap;
-        }
-        .btn-quick:hover{ opacity: 0.9; transform: translateY(-1px); color: #fff !important; }
-        .btn-quick:active{ transform: translateY(0); }
-        /* Same colors as admin_dashboard.php quick actions */
-        .btn-quick.quick-action-add { background: #2563eb; }
-        .btn-quick.quick-action-logs { background: #0d9488; }
-        .btn-quick.quick-action-offices { background: #475569; }
-        .btn-quick.quick-action-property { background: #ea580c; }
-        .btn-quick.quick-action-archived { background: #64748b; }
-
-        .stats-panel{
-            border:1px solid #0b0b0b;
-            padding:1rem;
-            margin-top:1rem;
-            border-radius:4px;
-            background:transparent;
-        }
-
-        .stats-title{
-            font-weight:700;
-            text-transform:uppercase;
-            letter-spacing:1px;
-            margin-bottom:0.75rem;
-            font-size:0.95rem;
-        }
-
-        .months-row{
-            display:flex;
-            gap:18px;
-            flex-wrap:wrap;
-            padding:0.6rem 0;
-        }
-
-        .months-row span{
-            font-weight:700;
-            text-transform:uppercase;
-            font-size:0.85rem;
-            letter-spacing:1px;
-        }
-
-        /* Statistics chart panel (Jan-Dec) */
-        .stats-chart-panel{
-            background:#fff;
-            border:2px solid #0b0b0b;
-            border-radius:4px;
-            padding:1.5rem;
-            margin-top:1.5rem;
-        }
-        .stats-chart-title{
-            font-weight:800;
-            text-transform:uppercase;
-            letter-spacing:0.8px;
-            font-size:1.05rem;
-            color:#0b1720;
-            margin:0 0 1rem 0;
-        }
-        .stats-chart-wrap{
-            position:relative;
-            width:100%;
-            height:320px;
-            min-height:320px;
-        }
-
-        /* live date/time (right side of quick actions row) */
-        .live-datetime-container{
-            display:flex;
-            align-items:center;
-            gap:12px;
-            padding:0;
-            color:#0b1720;
-            font-weight:700;
-            text-transform:uppercase;
-            font-size:0.95rem;
-        }
-        .live-datetime-container span{ background:transparent; padding:4px 8px; border-radius:4px; }
-
-        /* Header controls (Admin design – light gray) */
-        .header-controls{ position:relative; }
-        .icon-btn, .avatar-btn{
-            background: #f1f5f9;
-            border: none;
-            color: #475569;
-            padding: 0;
-            border-radius: 10px;
-            cursor: pointer;
-            display:inline-flex;
-            align-items:center;
-            justify-content:center;
-        }
-        .icon-btn:hover, .avatar-btn:hover { background: #e2e8f0; color: #1e293b; }
-        .icon-btn{ position:relative; width:40px; height:40px; }
-        .icon-btn svg, .avatar-btn svg{ width:22px; height:22px; }
-        .notif-badge{
-            position:absolute;
-            top:8px;
-            right:8px;
-            background:#ef4444;
-            color:white;
-            font-size:12px;
-            padding:4px 8px;
-            border-radius:999px;
-            line-height:1;
-        }
-
-    .avatar-btn{ width:40px; height:40px; padding:0; border-radius:10px; }
-    .avatar-initial{ display:inline-block; width:100%; height:100%; border-radius:999px; display:flex; align-items:center; justify-content:center; font-weight:800; color:white; font-size:1.15rem; }
-
-        .notif-dropdown, .profile-dropdown{
-            position:absolute;
-            right:0;
-            top:48px;
-            background:white;
-            color:#0b1720;
-            min-width:180px;
-            border-radius:6px;
-            box-shadow:0 8px 20px rgba(2,6,23,0.12);
-            border:1px solid #e6eef8;
-            display:none;
-            z-index:1200;
-            padding:8px 0;
-        }
-
-        .notif-item{ padding:10px 12px; font-size:0.95rem; color:#475569; }
-        .profile-link{ display:flex; align-items:center; gap:8px; padding:10px 12px; text-decoration:none; color:#0b1720; }
-        .profile-link svg{ width:16px; height:16px; flex-shrink:0; }
-        .profile-link:hover{ background:#f1f5f9; }
-
-        /* Profile modal – matches dashboard (sidebar gold + purple) */
-        .profile-modal-overlay {
-            position: fixed; inset: 0; background: rgba(27, 21, 72, 0.5); z-index: 2000;
-            display: none; align-items: center; justify-content: center; padding: 1rem;
-        }
-        .profile-modal-overlay.profile-modal-open { display: flex; }
-        .profile-modal {
-            background: #fff; border-radius: 16px; box-shadow: 0 24px 48px rgba(27, 21, 72, 0.2);
-            border: 2px solid #D4AF37; max-width: 380px; width: 100%; overflow: hidden;
-        }
-        .profile-modal-header {
-            background: linear-gradient(135deg, #1b1548 0%, #2a2160 100%);
-            padding: 1.75rem 1.5rem; text-align: center; border-bottom: 3px solid #D4AF37;
-        }
-        .profile-modal-avatar {
-            width: 96px; height: 96px; border-radius: 50%; margin: 0 auto 1rem;
-            background: #D4AF37; color: #1b1548; font-size: 2.5rem; font-weight: 800;
-            display: flex; align-items: center; justify-content: center; border: 3px solid rgba(255,255,255,0.4);
-        }
-        .profile-modal-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
-        .profile-modal-title { color: #fff; font-size: 1.35rem; font-weight: 700; margin: 0; letter-spacing: 0.02em; }
-        .profile-modal-body { padding: 1.5rem 1.5rem 1.25rem; }
-        .profile-modal-row { display: flex; align-items: center; gap: 12px; padding: 0.75rem 0; border-bottom: 1px solid #e2e8f0; }
-        .profile-modal-row:last-of-type { border-bottom: none; }
-        .profile-modal-label { font-size: 0.8rem; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; min-width: 72px; }
-        .profile-modal-value { font-size: 0.95rem; color: #1e293b; font-weight: 500; }
-        .profile-modal-actions { display: flex; gap: 10px; padding: 1rem 1.5rem; background: #f8fafc; border-top: 1px solid #e2e8f0; }
-        .profile-modal-btn { flex: 1; padding: 12px 16px; border: none; border-radius: 10px; font-size: 0.95rem; font-weight: 600; cursor: pointer; text-align: center; text-decoration: none; display: inline-block; }
-        .profile-modal-btn-close { background: #e2e8f0; color: #475569; }
-        .profile-modal-btn-close:hover { background: #cbd5e1; }
-        .profile-modal-btn-logout { background: #1b1548; color: #fff; }
-        .profile-modal-btn-logout:hover { background: #2a2160; color: #fff; }
+        body { margin: 0; background: #f8fafc; color: #0f172a; }
+        .main-content { display: flex; flex-direction: column; background: #fff; min-height: 0; flex: 1; }
+        .main-content .admin-content-header-row { flex-shrink: 0; }
+        .main-content .admin-content-body { flex: 1; min-height: 0; overflow: auto; padding: 32px 35px; }
+        .main-content .profile-dropdown[hidden] { display: none !important; }
     </style>
 </head>
 <body>
     <div class="dashboard-container">
-        <!-- ========== LEFT SIDEBAR – LGU Solano style ========== -->
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <div class="sidebar-logo">
-                    <img src="../img/logo.png" alt="LGU Solano">
-                </div>
-                <div class="sidebar-title">
-                    <h2>LGU Solano<span>Document Management</span></h2>
-                </div>
-            </div>
-            <nav class="sidebar-nav">
-                <div class="nav-section-title">Main Menu</div>
-                <ul>
-                    <li><a href="dashboard.php" class="<?php echo $sidebar_active === 'dashboard' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
-                    <li><a href="documents.php" class="<?php echo $sidebar_active === 'documents' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Documents</a></li>
-                    <li><a href="document-history.php" class="<?php echo $sidebar_active === 'document-history' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Document History</a></li>
-                </ul>
-                <div class="nav-section-title">Administration</div>
-                <ul>
-                    <li><a href="users.php" class="<?php echo $sidebar_active === 'users' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>User Management</a></li>
-                    <li><a href="offices-department.php" class="<?php echo $sidebar_active === 'offices' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/><path d="M9 18v.01"/></svg>Departments</a></li>
-                    <li><a href="activitylogs.php" class="<?php echo $sidebar_active === 'activitylogs' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Activity Logs</a></li>
-                    <li><a href="archived.php" class="<?php echo $sidebar_active === 'archived' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archived</a></li>
-                </ul>
-                <div class="nav-section-title">Account</div>
-                <ul>
-                    <li><a href="#" id="sidebar-settings-btn"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
-                </ul>
-            </nav>
-            <div class="sidebar-user">
-                <div class="sidebar-user-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
-                <div class="sidebar-user-info">
-                    <p class="sidebar-user-name"><?php echo htmlspecialchars($userName); ?></p>
-                    <p class="sidebar-user-role"><?php echo htmlspecialchars($userRole); ?></p>
-                </div>
-            </div>
-        </div>
+        <?php include __DIR__ . '/_sidebar_super_admin.php'; ?>
 
-        <!-- ========== RIGHT CONTENT: WELCOME & CARDS ========== -->
         <div class="main-content">
-            <!-- HEADER NOW MATCHES SIDEBAR COLOR EXACTLY -->
-            <div class="content-header">
-                <div class="dashboard-header">
-                    <div>
-                        <h1>
-                            <svg class="welcome-icon" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                            Welcome, <?php echo htmlspecialchars($userName); ?>!
-                        </h1>
-                        <small>Municipal Document Management System – Super Admin Dashboard</small>
-                    </div>
-                    <div style="display: flex; align-items: center; gap:12px;">
-                        <!-- Notification bell -->
-                        <div class="header-controls">
-                            <button class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
-                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                                <span class="notif-badge" id="notif-count" aria-hidden="true">3</span>
+            <div class="admin-content" id="admin-content">
+                <div class="admin-content-header-row">
+                    <header class="admin-content-header">
+                        <div class="admin-header-text">
+                            <h1 class="admin-content-title">Welcome back, <?php echo htmlspecialchars($welcomeUsername); ?></h1>
+                            <p class="admin-content-subtitle" id="dashboard-subtitle">Super Admin Dashboard • </p>
+                        </div>
+                    </header>
+                    <div class="admin-content-actions">
+                        <button type="button" class="admin-icon-btn" id="notif-btn" title="Notifications" aria-label="Notifications">
+                            <svg class="icon-bell" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                        </button>
+                        <div class="admin-profile-wrap">
+                            <button type="button" class="admin-icon-btn" id="profile-logout-btn" title="Profile and log out" aria-haspopup="true" aria-expanded="false" aria-label="Profile">
+                                <svg class="icon-person" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
                             </button>
-                            <div class="notif-dropdown" id="notif-dropdown" aria-hidden="true">
-                                <div class="notif-item">No new notifications</div>
+                            <div class="profile-dropdown" id="profile-dropdown" hidden>
+                                <a href="#" class="dropdown-item" id="header-profile-link">Profile</a>
+                                <a href="../index.php?logout=1" class="dropdown-item dropdown-logout">Log out</a>
                             </div>
                         </div>
-
-                        <!-- Profile avatar – opens modal -->
-                        <div class="header-controls">
-                            <button class="avatar-btn" id="profile-btn" aria-label="Profile" title="Profile">
-                                <svg class="avatar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-                                    <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4z" />
-                                    <path d="M6 20v-1c0-2.21 3.58-4 6-4s6 1.79 6 4v1" />
-                                </svg>
-                            </button>
+                    </div>
+                </div>
+                <div class="admin-content-body" id="admin-content-body">
+                    <div class="dashboard-upload-row">
+                        <a href="documents.php" class="btn-upload-document">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            Upload Document
+                        </a>
+                    </div>
+                    <div class="dashboard-metrics">
+                        <div class="metric-card">
+                            <span class="metric-label">TOTAL DOCUMENTS</span>
+                            <span class="metric-value"><?php echo (int)$totalDocuments; ?></span>
+                            <svg class="metric-icon metric-icon-doc" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-label">PENDING</span>
+                            <span class="metric-value"><?php echo (int)$pendingCount; ?></span>
+                            <svg class="metric-icon metric-icon-pending" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-label">APPROVED</span>
+                            <span class="metric-value"><?php echo (int)$approvedCount; ?></span>
+                            <svg class="metric-icon metric-icon-approved" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                        </div>
+                        <div class="metric-card">
+                            <span class="metric-label">COMPLETED</span>
+                            <span class="metric-value"><?php echo (int)$completedCount; ?></span>
+                            <svg class="metric-icon metric-icon-completed" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
                         </div>
                     </div>
-                </div>
-            </div>
-            
-            <div class="content-body">
-                <!-- Quick Actions + Date/Time on same row -->
-                <div class="quick-actions-row">
-                    <div class="quick-actions-section">
-                        <div class="quick-actions-title">
-                            <svg class="quick-actions-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-                            Quick Actions:
+
+                    <div class="dashboard-middle">
+                        <div class="dashboard-card my-tasks-card">
+                            <div class="card-head">
+                                <h3 class="card-title">My Tasks</h3>
+                                <a href="documents.php" class="card-link">View All →</a>
+                            </div>
+                            <div class="my-tasks-empty">
+                                <svg class="tasks-check-icon" viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                <p class="tasks-empty-title">All caught up!</p>
+                                <p class="tasks-empty-sub">No pending tasks at the moment</p>
+                            </div>
                         </div>
-                        <div class="quick-actions" role="navigation" aria-label="Quick actions">
-                        <a href="offices-department.php" class="btn-quick quick-action-offices">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/><path d="M9 18v.01"/></svg>
-                        </a>
-                        <a href="users.php" class="btn-quick quick-action-add">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                            USERS/ACCOUNT
-                        </a>
-                        <a href="documents.php" class="btn-quick quick-action-property">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
-                            DOCUMENTS
-                        </a>
-                        <a href="document-history.php" class="btn-quick quick-action-logs">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                            DOCUMENT HISTORY
-                        </a>
-                        <a href="activitylogs.php" class="btn-quick quick-action-logs">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                            LOGS
-                        </a>
-                        <a href="archived.php" class="btn-quick quick-action-archived">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-                            ARCHIVED
-                        </a>
-                    </div>
-                    </div>
-                    <div class="live-datetime-container" aria-live="polite" aria-label="Current date and time">
-                        <span id="dash-live-date">&nbsp;</span>
-                        <span id="dash-live-time">&nbsp;</span>
-                    </div>
-                </div>
-
-                <!-- Statistics chart: January to December -->
-                <div class="stats-chart-panel">
-                    <h3 class="stats-chart-title">Statistics (January – December)</h3>
-                    <div class="stats-chart-wrap">
-                        <canvas id="chart-monthly-stats" width="800" height="320"></canvas>
-                    </div>
-                </div>
-
-                <!-- dashboard quick action cards (keep original structure) -->
-                <div class="card-grid">
-                    <div class="card">
-                        <h2>Offices</h2>
-                        <p>Manage municipal offices and departments used for routing and classification of documents.</p>
-                        <a href="offices-department.php">Go to Offices →</a>
+                        <div class="dashboard-card status-breakdown-card">
+                            <h3 class="card-title">Status Breakdown</h3>
+                            <div class="status-chart-wrap">
+                                <canvas id="chart-status-breakdown" width="280" height="280"></canvas>
+                            </div>
+                            <div class="status-legend">
+                                <span class="legend-item"><i class="legend-dot" style="background:#2563eb"></i> Archived</span>
+                                <span class="legend-item"><i class="legend-dot" style="background:#ea580c"></i> Pending Admin</span>
+                                <span class="legend-item"><i class="legend-dot" style="background:#16a34a"></i> Pending Department</span>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="card">
-                        <h2>Documents</h2>
-                        <p>Create, track, and archive municipal documents across all participating departments.</p>
-                        <a href="documents.php">Go to Documents →</a>
+                    <div class="dashboard-card recent-docs-card">
+                        <div class="card-head">
+                            <h3 class="card-title">Recent Documents</h3>
+                            <a href="documents.php" class="card-link">View All →</a>
+                        </div>
+                        <div class="recent-docs-table-wrap">
+                            <table class="recent-docs-table">
+                                <thead>
+                                    <tr>
+                                        <th>CONTROL NO.</th>
+                                        <th>TITLE</th>
+                                        <th>STATUS</th>
+                                        <th>DATE</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (empty($recentDocuments)): ?>
+                                    <tr>
+                                        <td colspan="4" class="recent-docs-empty">No recent documents</td>
+                                    </tr>
+                                    <?php else: ?>
+                                    <?php foreach ($recentDocuments as $doc): ?>
+                                    <?php
+                                        $controlNo = isset($doc['controlNo']) ? htmlspecialchars($doc['controlNo']) : (isset($doc['control_no']) ? htmlspecialchars($doc['control_no']) : '—');
+                                        $title = isset($doc['title']) ? htmlspecialchars($doc['title']) : (isset($doc['subject']) ? htmlspecialchars($doc['subject']) : '—');
+                                        $status = isset($doc['status']) ? htmlspecialchars($doc['status']) : 'Pending';
+                                        $date = '—';
+                                        if (isset($doc['createdAt'])) {
+                                            $dt = $doc['createdAt'];
+                                            if ($dt instanceof DateTimeInterface) {
+                                                $date = $dt->format('M j, Y');
+                                            } elseif (is_string($dt)) {
+                                                $date = date('M j, Y', strtotime($dt));
+                                            }
+                                        }
+                                    ?>
+                                    <tr>
+                                        <td><a href="documents.php" class="control-no-link"><?php echo $controlNo; ?></a></td>
+                                        <td><?php echo $title; ?></td>
+                                        <td><span class="status-badge status-pending"><?php echo $status; ?></span></td>
+                                        <td><?php echo $date; ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-
-                    <div class="card">
-                        <h2>Search & Tracking</h2>
-                        <p>Find documents by code, subject, or department and monitor their current status.</p>
-                        <a href="#">Open Search →</a>
-                    </div>
-                </div>
-                
-                <!-- optional extra info: could be quick stats or nothing -->
-                <div class="attribution">
-                    ⚙️ Super admin privileges — full access to all modules.
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Profile modal -->
-    <div class="profile-modal-overlay" id="profile-modal-overlay" aria-hidden="true">
-        <div class="profile-modal" id="profile-modal" role="dialog" aria-labelledby="profile-modal-title">
-            <div class="profile-modal-header">
-                <div class="profile-modal-avatar" id="profile-modal-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
-                <h2 class="profile-modal-title" id="profile-modal-title"><?php echo htmlspecialchars($userName); ?></h2>
-            </div>
-            <div class="profile-modal-body">
-                <div class="profile-modal-row">
-                    <span class="profile-modal-label">Username</span>
-                    <span class="profile-modal-value"><?php echo htmlspecialchars($userName); ?></span>
-                </div>
-                <div class="profile-modal-row">
-                    <span class="profile-modal-label">Email</span>
-                    <span class="profile-modal-value"><?php echo htmlspecialchars($userEmail); ?></span>
-                </div>
-                <div class="profile-modal-row">
-                    <span class="profile-modal-label">Role</span>
-                    <span class="profile-modal-value"><?php echo htmlspecialchars($userRole); ?></span>
-                </div>
-            </div>
-            <div class="profile-modal-actions">
-                <button type="button" class="profile-modal-btn profile-modal-btn-close" id="profile-modal-close">Close</button>
-                <a href="../index.php?logout=1" class="profile-modal-btn profile-modal-btn-logout">Log out</a>
-            </div>
-        </div>
-    </div>
-</body>
-</html>
-<script>
-// Notification dropdown
-(function(){
-    var notifBtn = document.getElementById('notif-btn');
-    var notifDropdown = document.getElementById('notif-dropdown');
-    function closeNotif(){
-        if (notifDropdown) notifDropdown.style.display = 'none';
-    }
-    if (notifBtn) notifBtn.addEventListener('click', function(e){
-        e.stopPropagation();
-        if (!notifDropdown) return;
-        var showing = notifDropdown.style.display === 'block';
-        closeNotif();
-        notifDropdown.style.display = showing ? 'none' : 'block';
-    });
-    document.addEventListener('click', function(){ closeNotif(); });
-})();
+    <?php include __DIR__ . '/_profile_modal_super_admin.php'; ?>
+    <script src="sidebar_super_admin.js"></script>
+    <script>
+    (function() {
+        function updateSubtitle() {
+            var el = document.getElementById('dashboard-subtitle');
+            if (el) {
+                var now = new Date();
+                var day = now.toLocaleDateString('en-US', { weekday: 'long' });
+                var date = now.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+                el.textContent = 'Super Admin Dashboard • ' + day + ', ' + date;
+            }
+        }
+        updateSubtitle();
+        setInterval(updateSubtitle, 60000);
 
-// Profile modal
-(function(){
-    var profileBtn = document.getElementById('profile-btn');
-    var overlay = document.getElementById('profile-modal-overlay');
-    var modal = document.getElementById('profile-modal');
-    var closeBtn = document.getElementById('profile-modal-close');
-    function openModal(){
-        if (overlay) { overlay.classList.add('profile-modal-open'); overlay.setAttribute('aria-hidden', 'false'); }
-        if (modal) modal.setAttribute('aria-hidden', 'false');
-    }
-    function closeModal(){
-        if (overlay) { overlay.classList.remove('profile-modal-open'); overlay.setAttribute('aria-hidden', 'true'); }
-        if (modal) modal.setAttribute('aria-hidden', 'true');
-    }
-    if (profileBtn) profileBtn.addEventListener('click', function(e){ e.stopPropagation(); openModal(); });
-    var sidebarSettings = document.getElementById('sidebar-settings-btn');
-    if (sidebarSettings) sidebarSettings.addEventListener('click', function(e){ e.preventDefault(); openModal(); });
-    if (closeBtn) closeBtn.addEventListener('click', closeModal);
-    if (overlay) overlay.addEventListener('click', function(e){ if (e.target === overlay) closeModal(); });
-    document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeModal(); });
-})();
-// live date/time updater for the container
-(function(){
-    var dateEl = document.getElementById('dash-live-date');
-    var timeEl = document.getElementById('dash-live-time');
-    function update(){
-        var now = new Date();
-        if (dateEl) dateEl.textContent = now.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-        if (timeEl) timeEl.textContent = now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    }
-    update();
-    setInterval(update, 1000);
-})();
+        var profileBtn = document.getElementById('profile-logout-btn');
+        var profileDropdown = document.getElementById('profile-dropdown');
+        var profileLink = document.getElementById('header-profile-link');
+        var profileOverlay = document.getElementById('profile-modal-overlay');
+        if (profileBtn && profileDropdown) {
+            profileBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var open = profileDropdown.hidden;
+                profileDropdown.hidden = !open;
+                profileBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+            document.addEventListener('click', function() {
+                profileDropdown.hidden = true;
+                profileBtn.setAttribute('aria-expanded', 'false');
+            });
+            profileDropdown.addEventListener('click', function(e) { e.stopPropagation(); });
+        }
+        if (profileLink && profileOverlay) {
+            profileLink.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (profileDropdown) profileDropdown.hidden = true;
+                if (profileBtn) profileBtn.setAttribute('aria-expanded', 'false');
+                profileOverlay.classList.add('profile-modal-open');
+                profileOverlay.setAttribute('aria-hidden', 'false');
+            });
+        }
 
-// Monthly statistics chart (Jan–Dec)
-(function(){
-    function renderMonthlyChart(){
-        if (typeof Chart === 'undefined') return;
-        var ctx = document.getElementById('chart-monthly-stats');
-        if (!ctx) return;
-        try {
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sept','Oct','Nov','Dec'],
-                    datasets: [{
-                        label: 'Documents',
-                        data: [42, 58, 51, 72, 65, 88, 74, 61, 95, 82, 78, 91],
-                        backgroundColor: '#2563eb',
-                        borderColor: '#1e40af',
-                        borderWidth: 1,
-                        borderRadius: 6,
-                        borderSkipped: false
-                    }]
-                },
+        var statusData = {
+            labels: ['Archived', 'Pending Admin', 'Pending Department'],
+            datasets: [{
+                data: [<?php echo (int)($statusBreakdown['Archived'] ?? 0); ?>, <?php echo (int)($statusBreakdown['Pending Admin'] ?? 0); ?>, <?php echo (int)($statusBreakdown['Pending Department'] ?? 0); ?>],
+                backgroundColor: ['#2563eb', '#ea580c', '#16a34a'],
+                borderWidth: 0,
+                hoverOffset: 4
+            }]
+        };
+        var statusCtx = document.getElementById('chart-status-breakdown');
+        if (statusCtx && typeof Chart !== 'undefined') {
+            new Chart(statusCtx, {
+                type: 'doughnut',
+                data: statusData,
                 options: {
                     responsive: true,
-                    maintainAspectRatio: false,
+                    maintainAspectRatio: true,
+                    cutout: '60%',
                     plugins: {
                         legend: { display: false },
-                        tooltip: { backgroundColor: '#0b1f3a', titleColor: '#fff', bodyColor: '#b8d4ee', padding: 12 }
-                    },
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            grid: { color: '#e2e8f0' },
-                            ticks: { color: '#64748b', font: { size: 12 } }
-                        },
-                        x: {
-                            grid: { display: false },
-                            ticks: { color: '#64748b', font: { size: 12 } }
+                        tooltip: {
+                            callbacks: {
+                                label: function(ctx) {
+                                    var total = ctx.dataset.data.reduce(function(a, b) { return a + b; }, 0);
+                                    var pct = total ? ((ctx.raw / total) * 100).toFixed(1) : 0;
+                                    return ctx.label + ': ' + ctx.raw + ' (' + pct + '%)';
+                                }
+                            }
                         }
                     }
                 }
             });
-        } catch(e) { console.error('Chart error:', e); }
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function(){ setTimeout(renderMonthlyChart, 300); });
-    else setTimeout(renderMonthlyChart, 300);
-})();
-</script>
+        }
+    })();
+    </script>
+</body>
+</html>
