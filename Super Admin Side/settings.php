@@ -37,39 +37,11 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
     <title>DMS LGU – Settings</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="sidebar_super_admin.css">
+    <link rel="stylesheet" href="profile_modal_super_admin.css">
     <style>
         body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
-        .dashboard-container { display: flex; min-height: 100vh; border-top: 3px solid #D4AF37; }
-        .sidebar { width: 260px; height: 100vh; position: fixed; left: 0; top: 0; z-index: 100; background: #1A202C; color: #fff; display: flex; flex-direction: column; box-shadow: 2px 0 12px rgba(0,0,0,0.08); border-right: 1px solid rgba(255, 255, 255, 0.06); }
-        .sidebar-header { padding: 1.25rem 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; align-items: center; gap: 0.75rem; }
-        .sidebar-logo { width: 44px; height: 44px; border-radius: 8px; background: #63B3ED; flex-shrink: 0; overflow: hidden; }
-        .sidebar-logo img { width: 100%; height: 100%; object-fit: cover; }
-        .sidebar-title h2 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #fff; }
-        .sidebar-title h2 span { font-size: 0.75rem; font-weight: 500; display: block; color: #A0AEC0; margin-top: 2px; }
-        .sidebar-nav { flex: 1; padding: 1rem 0.75rem; overflow-y: auto; }
-        .sidebar-nav .nav-section-title { font-size: 0.7rem; font-weight: 600; letter-spacing: 0.08em; color: #718096; padding: 0.75rem 0.75rem 0.35rem; text-transform: uppercase; }
-        .sidebar-nav ul { list-style: none; padding: 0; margin: 0; }
-        .sidebar-nav li { margin: 0.2rem 0; }
-        .sidebar-nav a { display: flex; align-items: center; gap: 10px; padding: 0.6rem 0.75rem; color: #fff; text-decoration: none; font-size: 0.95rem; font-weight: 500; border-radius: 8px; transition: background 0.15s, color 0.15s; }
-        .sidebar-nav a .nav-icon { width: 22px; height: 22px; flex-shrink: 0; color: #A0AEC0; }
-        .sidebar-nav a:hover, .sidebar-nav a:hover .nav-icon { background: rgba(255,255,255,0.06); color: #fff; }
-        .sidebar-nav a.active { background: #3B82F6; color: #fff; }
-        .sidebar-nav a.active .nav-icon { color: #fff; }
-        .sidebar-user-wrap { position: relative; padding: 0 1rem 1.25rem; border-top: 1px solid rgba(255,255,255,0.06); }
-        .sidebar-user { padding: 0.75rem; border-radius: 8px; display: flex; align-items: center; gap: 0.75rem; cursor: pointer; }
-        .sidebar-user:hover { background: rgba(255,255,255,0.08); }
-        .sidebar-user-avatar { width: 40px; height: 40px; border-radius: 50%; background: #63B3ED; color: #fff; font-size: 0.9rem; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
-        .sidebar-user-avatar img { width: 100%; height: 100%; object-fit: cover; }
-        .sidebar-user-name { font-size: 0.95rem; font-weight: 600; color: #fff; margin: 0; }
-        .sidebar-user-role { font-size: 0.8rem; color: #A0AEC0; margin: 2px 0 0 0; }
-        .account-dropdown { position: absolute; left: 1rem; right: 1rem; bottom: 0; transform: translateY(calc(-100% - 10px)); background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.15); padding: 6px 0; min-width: 160px; z-index: 1100; display: none; overflow: hidden; }
-        .account-dropdown.open { display: block; }
-        .account-dropdown-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; border: none; background: none; color: #1e293b; font-size: 0.9rem; cursor: pointer; text-align: left; text-decoration: none; font-family: inherit; box-sizing: border-box; }
-        .account-dropdown-item:hover { background: #f1f5f9; }
-        .account-dropdown-item.profile-link:hover { background: rgba(59,130,246,0.1); color: #3B82F6; }
-        .account-dropdown-item.signout-link:hover { background: #dc2626; color: #fff; }
-        .account-dropdown-item svg { width: 18px; height: 18px; flex-shrink: 0; }
-        .main-content { flex: 1; margin-left: 260px; padding: 0; background: #f1f5f9; display: flex; flex-direction: column; }
+        .main-content { background: #f1f5f9; }
         .content-header { background: #fff; padding: 1.5rem 2.2rem; border-bottom: 1px solid #e2e8f0; }
         .content-header h1 { margin: 0; font-size: 1.6rem; font-weight: 700; color: #1e293b; }
         .content-header small { display: block; color: #64748b; font-size: 0.95rem; margin-top: 6px; }
@@ -120,41 +92,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
 </head>
 <body>
     <div class="dashboard-container">
-        <div class="sidebar">
-            <div class="sidebar-header">
-                <div class="sidebar-logo"><img src="../img/logo.png" alt="LGU Solano"></div>
-                <div class="sidebar-title"><h2>LGU Solano<span>Document Management</span></h2></div>
-            </div>
-            <nav class="sidebar-nav">
-                <div class="nav-section-title">Main Menu</div>
-                <ul>
-                    <li><a href="dashboard.php" class="<?= $sidebar_active === 'dashboard' ? 'active' : '' ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
-                    <li><a href="documents.php"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Documents</a></li>
-                    <li><a href="document-history.php"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>Document History</a></li>
-                </ul>
-                <div class="nav-section-title">Administration</div>
-                <ul>
-                    <li><a href="users.php"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>User Management</a></li>
-                    <li><a href="offices-department.php"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/></svg>Departments</a></li>
-                    <li><a href="activitylogs.php"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Activity Logs</a></li>
-                    <li><a href="archived.php"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><polyline points="21 8 21 21 3 21 3 8"/></svg>Archived</a></li>
-                </ul>
-                <div class="nav-section-title">Account</div>
-                <ul>
-                    <li><a href="settings.php" class="active"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>Settings</a></li>
-                </ul>
-            </nav>
-            <div class="sidebar-user-wrap">
-                <div class="sidebar-user" id="sidebar-account-btn" role="button" tabindex="0" aria-haspopup="true">
-                    <div class="sidebar-user-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?= htmlspecialchars($_SESSION['user_photo']) ?>" alt=""><?php else: ?><?= htmlspecialchars($userInitial) ?><?php endif; ?></div>
-                    <div><p class="sidebar-user-name"><?= htmlspecialchars($userName) ?></p><p class="sidebar-user-role"><?= htmlspecialchars($userRole) ?></p></div>
-                </div>
-                <div class="account-dropdown" id="account-dropdown">
-                    <a href="offices-department.php?open=profile" class="account-dropdown-item profile-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profile</a>
-                    <a href="../index.php?logout=1" class="account-dropdown-item signout-link"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Sign Out</a>
-                </div>
-            </div>
-        </div>
+        <?php include __DIR__ . '/_sidebar_super_admin.php'; ?>
         <div class="main-content">
             <div class="content-header">
                 <h1>Settings</h1>
@@ -189,6 +127,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
             </div>
         </div>
     </div>
+    <?php include __DIR__ . '/_profile_modal_super_admin.php'; ?>
 
     <div class="signature-modal-overlay" id="signature-modal-overlay">
         <div class="signature-modal">
@@ -232,15 +171,8 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
         <input type="hidden" name="photo" id="profile-photo-hidden-input">
     </form>
 
+    <script src="sidebar_super_admin.js"></script>
     <script>
-    (function(){
-        var accountBtn = document.getElementById('sidebar-account-btn');
-        var dropdown = document.getElementById('account-dropdown');
-        if (accountBtn && dropdown) {
-            accountBtn.addEventListener('click', function(e){ e.stopPropagation(); dropdown.classList.toggle('open'); });
-            document.addEventListener('click', function(e){ if (!e.target.closest('.sidebar-user-wrap')) dropdown.classList.remove('open'); });
-        }
-    })();
     (function(){
         var toast = document.getElementById('settings-toast');
         if (toast) setTimeout(function(){ toast.remove(); }, 5000);
