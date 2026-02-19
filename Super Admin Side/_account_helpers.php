@@ -13,6 +13,23 @@ function getAccountManager() {
     return new MongoDB\Driver\Manager($config['uri']);
 }
 
+function getUserUsername($userId) {
+    global $config;
+    if ($userId === '') return '';
+    $namespace = $config['database'] . '.users';
+    try {
+        $manager = getAccountManager();
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($userId)], ['projection' => ['username' => 1]]);
+        $cursor = $manager->executeQuery($namespace, $query);
+        $users = $cursor->toArray();
+        if (count($users) > 0) {
+            $u = (array)$users[0];
+            return trim($u['username'] ?? '');
+        }
+    } catch (Exception $e) {}
+    return '';
+}
+
 function getUserSignature($userId) {
     global $config;
     if ($userId === '') return '';

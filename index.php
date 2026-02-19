@@ -96,6 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_type']) && $_PO
                     $_SESSION['user_id'] = (string)$user['_id'];
                     $_SESSION['user_email'] = $user['email'] ?? $username;
                     $_SESSION['user_name'] = $user['name'] ?? $username;
+                    $_SESSION['user_username'] = $user['username'] ?? '';
                     $sessionRole = $user['role'] ?? $desiredRole;
                     $_SESSION['user_role'] = $sessionRole;
                     if ($sessionRole === 'superadmin') {
@@ -156,6 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['login_type']) || $_
                     $_SESSION['user_id'] = (string)$userArray['_id'];
                     $_SESSION['user_email'] = $email;
                     $_SESSION['user_name'] = $userArray['name'] ?? $email;
+                    $_SESSION['user_username'] = $userArray['username'] ?? '';
                     $_SESSION['user_role'] = $userArray['role'] ?? 'user';
                     $role = $_SESSION['user_role'] ?? '';
                     if ($role === 'superadmin') {
