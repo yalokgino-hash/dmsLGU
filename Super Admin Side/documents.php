@@ -23,17 +23,19 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
     <meta charset="UTF-8">
     <title>DMS LGU – Documents</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
-    <link rel="stylesheet" href="sidebar_super_admin.css">
     <link rel="stylesheet" href="profile_modal_super_admin.css">
+    <link rel="stylesheet" href="../Admin Side/admin-dashboard.css">
+    <link rel="stylesheet" href="../Admin Side/admin-offices.css">
+    <link rel="stylesheet" href="sidebar_super_admin.css">
     <style>
-        body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
-        .main-content { background: #f8fafc; }
-        .content-header { background: #fff; padding: 1.5rem 2.2rem; border-bottom: 1px solid #e2e8f0; }
+        body { margin: 0; background: #f8fafc; color: #0f172a; }
+        .main-content { display: flex; flex-direction: column; flex: 1; min-height: 0; background: #fff; }
+        .content-header { background: #fff; padding: 1.5rem 2.2rem; border-bottom: 1px solid #e2e8f0; flex-shrink: 0; }
         .dashboard-header { display: flex; justify-content: space-between; align-items: center; }
         .dashboard-header h1 { font-size: 1.6rem; margin: 0 0 0.2rem 0; font-weight: 700; color: #1e293b; }
         .dashboard-header small { display: block; color: #64748b; font-size: 0.95rem; margin-top: 6px; }
-        .content-body { padding: 2rem 2.2rem; }
         .header-controls { position: relative; }
         .icon-btn, .avatar-btn { background: #f1f5f9; border: none; color: #475569; padding: 0; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
         .icon-btn:hover, .avatar-btn:hover { background: #e2e8f0; color: #1e293b; }
@@ -41,28 +43,9 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
         .icon-btn svg, .avatar-btn svg { width: 22px; height: 22px; }
         .notif-badge { position: absolute; top: 8px; right: 8px; background: #ef4444; color: white; font-size: 12px; padding: 4px 8px; border-radius: 999px; line-height: 1; }
         .avatar-btn { width: 40px; height: 40px; padding: 0; border-radius: 10px; }
-        .notif-dropdown, .profile-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 180px; border-radius: 6px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 8px 0; }
+        .notif-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 180px; border-radius: 6px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 8px 0; }
         .notif-item { padding: 10px 12px; font-size: 0.95rem; color: #475569; }
-        .profile-link { display: flex; align-items: center; gap: 8px; padding: 10px 12px; text-decoration: none; color: #0b1720; }
-        .profile-link svg { width: 16px; height: 16px; flex-shrink: 0; }
-        .profile-link:hover { background: #f1f5f9; }
-        /* Documents section */
-        .documents-card { background: #fff; border: 2px solid #0b0b0b; border-radius: 4px; padding: 1.5rem; }
-        .documents-title { font-weight: 800; text-transform: uppercase; letter-spacing: 0.8px; font-size: 1.05rem; color: #0b1720; margin: 0 0 1rem 0; }
-        .documents-tools { display: grid; grid-template-columns: 1.4fr 1fr 1fr auto auto; gap: 12px; margin-bottom: 16px; }
-        .documents-tools input { height: 42px; border: 1px solid #cbd5e1; border-radius: 10px; padding: 0 12px; font-size: 14px; color: #1e293b; background: #fff; outline: none; }
-        .documents-tools input:focus { border-color: #1e3a5f; box-shadow: 0 0 0 3px rgba(30,58,95,0.15); }
-        .documents-btn { height: 42px; border: none; border-radius: 10px; padding: 0 16px; background: #1e3a5f; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
-        .documents-btn:hover { background: #2d4a6f; }
-        .documents-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
-        .documents-btn-secondary { background: #64748b; }
-        .documents-btn-secondary:hover { background: #475569; }
-        .documents-table-frame { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; overflow: hidden; margin-top: 1rem; }
-        .documents-table { width: 100%; border-collapse: collapse; }
-        .documents-table thead th { text-align: left; padding: 14px 16px; font-size: 13px; font-weight: 600; letter-spacing: 0.03em; color: #475569; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
-        .documents-table tbody td { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; color: #334155; font-size: 14px; }
-        .documents-empty { text-align: center; height: 200px; color: #64748b; vertical-align: middle; }
-        @media (max-width: 980px) { .documents-tools { grid-template-columns: 1fr 1fr; } }
+        .main-content .admin-content-body { padding-top: 24px; }
     </style>
 </head>
 <body>
@@ -95,31 +78,35 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
                 </div>
             </div>
 
-            <div class="content-body">
-                <section class="documents-card">
-                    <h2 class="documents-title">Documents</h2>
-                    <div class="documents-tools">
-                        <input type="text" placeholder="Search by code or title" aria-label="Search">
+            <div class="admin-content-body">
+                <section class="chart-card chart-card-wide offices-card">
+                    <div class="offices-tools doc-filter-row">
+                        <input type="text" placeholder="Search" aria-label="Search document">
                         <input type="date" aria-label="From date">
                         <input type="date" aria-label="To date">
-                        <button type="button" class="documents-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add Document</button>
-                        <button type="button" class="documents-btn documents-btn-secondary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>Edit</button>
+                        <button type="button" class="offices-btn" id="open-add-document-modal">
+                            <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+                            Add Document
+                        </button>
+                        <button type="button" class="offices-btn offices-btn-secondary" id="edit-document-btn">
+                            <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                            Edit
+                        </button>
                     </div>
 
-                    <div class="documents-table-frame">
-                        <table class="documents-table">
+                    <div class="offices-table-frame">
+                        <table class="offices-table">
                             <thead>
                                 <tr>
                                     <th>NO.</th>
                                     <th>DOCUMENT CODE</th>
                                     <th>DOCUMENT TITLE</th>
                                     <th>DOCX FILE</th>
-                                    <th>ACTION</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody id="documents-table-body">
                                 <tr>
-                                    <td colspan="5" class="documents-empty">No documents yet.</td>
+                                    <td colspan="4" class="offices-empty" id="no-documents-row">No documents yet.</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -128,16 +115,163 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
             </div>
         </div>
     </div>
+
+    <div class="doc-modal" id="add-document-modal" hidden>
+        <button type="button" class="doc-modal-overlay" data-close-add-document aria-label="Close"></button>
+        <div class="doc-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="add-document-title">
+            <div class="doc-modal-header">
+                <h2 id="add-document-title">Add Document</h2>
+                <button type="button" class="doc-modal-close" data-close-add-document aria-label="Close">&times;</button>
+            </div>
+            <form id="add-document-form" class="doc-modal-form">
+                <div class="doc-form-field">
+                    <label for="document-code">Document Code</label>
+                    <input type="text" id="document-code" name="document_code" placeholder="e.g. DOC-001" required>
+                </div>
+                <div class="doc-form-field">
+                    <label for="document-title">Document Title</label>
+                    <input type="text" id="document-title" name="document_title" placeholder="Enter document title" required>
+                </div>
+                <div class="doc-form-field">
+                    <label for="document-file">DOCX File</label>
+                    <input type="file" id="document-file" name="document_file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
+                </div>
+                <p class="doc-form-error" id="document-form-error" hidden></p>
+                <div class="doc-modal-actions">
+                    <button type="button" class="doc-btn doc-btn-cancel" data-close-add-document>Cancel</button>
+                    <button type="submit" class="doc-btn doc-btn-save">Save Document</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <?php include __DIR__ . '/_profile_modal_super_admin.php'; ?>
-<script>
-(function(){
-    var notifBtn = document.getElementById('notif-btn');
-    var notifDropdown = document.getElementById('notif-dropdown');
-    function closeNotif(){ if (notifDropdown) notifDropdown.style.display = 'none'; }
-    if (notifBtn) notifBtn.addEventListener('click', function(e){ e.stopPropagation(); if (!notifDropdown) return; var showing = notifDropdown.style.display === 'block'; closeNotif(); notifDropdown.style.display = showing ? 'none' : 'block'; });
-    document.addEventListener('click', function(){ closeNotif(); });
-})();
-</script>
-<script src="sidebar_super_admin.js"></script>
+
+    <script>
+    (function() {
+        var openAddModalBtn = document.getElementById('open-add-document-modal');
+        var addModal = document.getElementById('add-document-modal');
+        var addForm = document.getElementById('add-document-form');
+        var errorEl = document.getElementById('document-form-error');
+        var documentsTableBody = document.getElementById('documents-table-body');
+        var editBtn = document.getElementById('edit-document-btn');
+
+        function setFormError(message) {
+            if (!errorEl) return;
+            if (!message) {
+                errorEl.hidden = true;
+                errorEl.textContent = '';
+                return;
+            }
+            errorEl.hidden = false;
+            errorEl.textContent = message;
+        }
+
+        function openAddDocumentModal() {
+            if (!addModal) return;
+            addModal.hidden = false;
+            document.body.classList.add('modal-open');
+            setFormError('');
+        }
+
+        function closeAddDocumentModal() {
+            if (!addModal) return;
+            addModal.hidden = true;
+            document.body.classList.remove('modal-open');
+            setFormError('');
+            if (addForm) addForm.reset();
+        }
+
+        if (openAddModalBtn) {
+            openAddModalBtn.addEventListener('click', openAddDocumentModal);
+        }
+
+        document.querySelectorAll('[data-close-add-document]').forEach(function(closeBtn) {
+            closeBtn.addEventListener('click', closeAddDocumentModal);
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && addModal && !addModal.hidden) {
+                closeAddDocumentModal();
+            }
+        });
+
+        if (editBtn) {
+            editBtn.addEventListener('click', function() {
+                alert('Select a document row to edit. (Edit function can be added next.)');
+            });
+        }
+
+        if (addForm && documentsTableBody) {
+            addForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+
+                var codeInput = document.getElementById('document-code');
+                var titleInput = document.getElementById('document-title');
+                var fileInput = document.getElementById('document-file');
+
+                var documentCode = (codeInput && codeInput.value || '').trim();
+                var documentTitle = (titleInput && titleInput.value || '').trim();
+                var selectedFile = fileInput && fileInput.files ? fileInput.files[0] : null;
+
+                if (!documentCode || !documentTitle || !selectedFile) {
+                    setFormError('Please complete all required fields.');
+                    return;
+                }
+
+                if (!selectedFile.name.toLowerCase().endsWith('.docx')) {
+                    setFormError('Only .docx files are allowed.');
+                    return;
+                }
+
+                var emptyRow = document.getElementById('no-documents-row');
+                if (emptyRow) emptyRow.remove();
+
+                var rowNumber = documentsTableBody.querySelectorAll('tr[data-document-row]').length + 1;
+
+                var row = document.createElement('tr');
+                row.setAttribute('data-document-row', 'true');
+
+                var numberCell = document.createElement('td');
+                numberCell.textContent = String(rowNumber);
+                row.appendChild(numberCell);
+
+                var codeCell = document.createElement('td');
+                codeCell.textContent = documentCode;
+                row.appendChild(codeCell);
+
+                var titleCell = document.createElement('td');
+                titleCell.textContent = documentTitle;
+                row.appendChild(titleCell);
+
+                var fileCell = document.createElement('td');
+                var fileLink = document.createElement('a');
+                fileLink.className = 'doc-file-link';
+                fileLink.textContent = selectedFile.name;
+                try {
+                    fileLink.href = URL.createObjectURL(selectedFile);
+                    fileLink.download = selectedFile.name;
+                } catch (err) {
+                    fileLink.href = '#';
+                }
+                fileCell.appendChild(fileLink);
+                row.appendChild(fileCell);
+
+                documentsTableBody.appendChild(row);
+                closeAddDocumentModal();
+            });
+        }
+    })();
+    </script>
+    <script>
+    (function(){
+        var notifBtn = document.getElementById('notif-btn');
+        var notifDropdown = document.getElementById('notif-dropdown');
+        function closeNotif(){ if (notifDropdown) notifDropdown.style.display = 'none'; }
+        if (notifBtn) notifBtn.addEventListener('click', function(e){ e.stopPropagation(); if (!notifDropdown) return; var showing = notifDropdown.style.display === 'block'; closeNotif(); notifDropdown.style.display = showing ? 'none' : 'block'; });
+        document.addEventListener('click', function(){ closeNotif(); });
+    })();
+    </script>
+    <script src="sidebar_super_admin.js"></script>
 </body>
 </html>
