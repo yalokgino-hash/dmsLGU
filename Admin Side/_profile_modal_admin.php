@@ -18,7 +18,6 @@ if (function_exists('getUserPhoto') && !empty($_SESSION['user_id'])) {
     if ($dbPhoto !== '') $_SESSION['user_photo'] = $dbPhoto;
 }
 $profilePhotoDataUri = !empty($_SESSION['user_photo']) ? $_SESSION['user_photo'] : '';
-$currentScript = basename($_SERVER['PHP_SELF'] ?? 'admin_dashboard.php');
 ?>
 <div class="profile-modal-overlay" id="profile-modal-overlay" aria-hidden="true">
     <div class="profile-modal" id="profile-modal" role="dialog" aria-labelledby="profile-modal-title">
@@ -28,22 +27,6 @@ $currentScript = basename($_SERVER['PHP_SELF'] ?? 'admin_dashboard.php');
             <p class="profile-modal-subtitle">Your account information and password</p>
         </div>
         <div class="profile-modal-body">
-            <div class="profile-photo-card">
-                <h3>Profile Photo</h3>
-                <p class="profile-info-desc">Your avatar is saved in the database and shown in the sidebar</p>
-                <div class="profile-photo-row">
-                    <div class="profile-photo-avatar profile-pic-zoom-trigger" id="profile-modal-avatar" role="button" tabindex="0" title="Click to enlarge" data-photo="<?php echo $profilePhotoDataUri !== '' ? htmlspecialchars($profilePhotoDataUri) : ''; ?>" data-initial="<?php echo htmlspecialchars($userInitial); ?>"><?php if ($profilePhotoDataUri !== ''): ?><img src="<?php echo htmlspecialchars($profilePhotoDataUri); ?>" alt="Profile"><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
-                    <div class="profile-photo-actions">
-                        <label class="profile-modal-btn-upload" for="profile-modal-photo-input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Upload Photo</label>
-                        <input type="file" id="profile-modal-photo-input" accept="image/png,image/jpeg,image/jpg,image/gif" style="position:absolute;width:1px;height:1px;opacity:0;">
-                    </div>
-                </div>
-                <form method="post" id="profile-modal-photo-form" action="admin_settings.php" style="display:none;">
-                    <input type="hidden" name="action" value="update_photo">
-                    <input type="hidden" name="photo" id="profile-modal-photo-hidden">
-                    <input type="hidden" name="return_url" value="<?php echo htmlspecialchars($currentScript); ?>">
-                </form>
-            </div>
             <div class="profile-info-card">
                 <h3>Profile Information</h3>
                 <p class="profile-info-desc">Your account details and role in the system</p>
