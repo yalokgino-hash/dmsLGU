@@ -47,6 +47,24 @@ function getUserSignature($userId) {
     return '';
 }
 
+function getUserPhoto($userId) {
+    global $config;
+    if ($userId === '') return '';
+    $namespace = $config['database'] . '.users';
+    try {
+        $manager = getAccountManager();
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($userId)], ['projection' => ['photo' => 1]]);
+        $cursor = $manager->executeQuery($namespace, $query);
+        $users = $cursor->toArray();
+        if (count($users) > 0) {
+            $u = (array)$users[0];
+            $photo = $u['photo'] ?? '';
+            return is_string($photo) ? trim($photo) : '';
+        }
+    } catch (Exception $e) {}
+    return '';
+}
+
 function updateUserSignature($userId, $signatureBase64) {
     global $config;
     if ($userId === '') return ['success' => false, 'message' => 'Not authenticated.'];

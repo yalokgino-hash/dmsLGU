@@ -13,6 +13,31 @@ $userRole = $_SESSION['user_role'] ?? 'Admin';
 $userDepartment = $_SESSION['user_department'] ?? 'Not Assigned';
 $userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
 $sidebar_active = 'document-history';
+
+if (!function_exists('getUserPhoto')) require_once __DIR__ . '/../Super Admin Side/_account_helpers.php';
+if (function_exists('getUserPhoto') && !empty($_SESSION['user_id'])) { $fp = getUserPhoto($_SESSION['user_id']); if ($fp !== '') $_SESSION['user_photo'] = $fp; }
+
+$config = require __DIR__ . '/../config.php';
+$historyList = [];
+try {
+    $manager = new MongoDB\Driver\Manager($config['uri']);
+    $historyNamespace = $config['database'] . '.document_history';
+    $query = new MongoDB\Driver\Query([], ['sort' => ['dateTime' => -1], 'limit' => 500]);
+    $cursor = $manager->executeQuery($historyNamespace, $query);
+    foreach ($cursor as $row) {
+        $arr = (array)$row;
+        $arr['_id'] = (string)($arr['_id'] ?? '');
+        $dt = $arr['dateTime'] ?? null;
+        if ($dt instanceof MongoDB\BSON\UTCDateTime) {
+            $arr['dateTimeFormatted'] = $dt->toDateTime()->setTimezone(new DateTimeZone(date_default_timezone_get() ?: 'UTC'))->format('M j, Y g:i A');
+        } else {
+            $arr['dateTimeFormatted'] = '—';
+        }
+        $historyList[] = $arr;
+    }
+} catch (Exception $e) {
+    $historyList = [];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -23,6 +48,7 @@ $sidebar_active = 'document-history';
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="admin-dashboard.css">
     <link rel="stylesheet" href="admin-offices.css">
+    <link rel="stylesheet" href="profile_modal_admin.css">
     <style>
     body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
     .dashboard-container { display: flex; min-height: 100vh; border-top: 3px solid #D4AF37; }
@@ -185,9 +211,22 @@ $sidebar_active = 'document-history';
                                 </tr>
                             </thead>
                             <tbody id="history-table-body">
+                                <?php if (empty($historyList)): ?>
                                 <tr>
                                     <td colspan="6" class="history-empty" id="no-history-row">No document history yet.</td>
                                 </tr>
+                                <?php else: ?>
+                                <?php foreach ($historyList as $idx => $h): ?>
+                                <tr data-history-row>
+                                    <td><?php echo (int)($idx + 1); ?></td>
+                                    <td><?php echo htmlspecialchars($h['documentCode'] ?? '—'); ?></td>
+                                    <td><?php echo htmlspecialchars($h['documentTitle'] ?? '—'); ?></td>
+                                    <td><?php echo htmlspecialchars($h['dateTimeFormatted'] ?? '—'); ?></td>
+                                    <td><?php echo htmlspecialchars($h['action'] ?? '—'); ?></td>
+                                    <td><?php echo htmlspecialchars($h['userName'] ?? '—'); ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -203,37 +242,10 @@ $sidebar_active = 'document-history';
         </div>
     </div>
 
+    <?php include __DIR__ . '/_profile_modal_admin.php'; ?>
+    <script src="sidebar_admin.js"></script>
     <script>
     (function() {
-        var accountBtn = document.getElementById('sidebar-account-btn');
-        var accountDropdown = document.getElementById('account-dropdown');
-        function closeAccountDropdown() {
-            if (accountDropdown) {
-                accountDropdown.classList.remove('open');
-                if (accountBtn) accountBtn.setAttribute('aria-expanded', 'false');
-            }
-        }
-        if (accountBtn && accountDropdown) {
-            accountBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                accountDropdown.classList.toggle('open');
-                accountBtn.setAttribute('aria-expanded', accountDropdown.classList.contains('open'));
-            });
-            accountBtn.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    accountDropdown.classList.add('open');
-                    accountBtn.setAttribute('aria-expanded', 'true');
-                }
-            });
-            document.addEventListener('click', function(e) {
-                if (!e.target.closest('.sidebar-user-wrap')) closeAccountDropdown();
-            });
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') closeAccountDropdown();
-            });
-        }
-
         var notifBtn = document.getElementById('notif-btn');
         var notifDropdown = document.getElementById('notif-dropdown');
         function closeNotif() {
