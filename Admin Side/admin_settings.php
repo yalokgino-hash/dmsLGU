@@ -10,11 +10,14 @@ if (!isset($_SESSION['user_id']) || !in_array($role, ['admin', 'staff', 'departm
 $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
 $userEmail = $_SESSION['user_email'] ?? '';
 $userRole = $_SESSION['user_role'] ?? 'Admin';
+$userDepartment = $_SESSION['user_department'] ?? 'Not Assigned';
 $userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
 $sidebar_active = 'settings';
 
 $config = require __DIR__ . '/../config.php';
 require_once __DIR__ . '/../Super Admin Side/_account_helpers.php';
+
+if (function_exists('getUserPhoto') && !empty($_SESSION['user_id'])) { $fp = getUserPhoto($_SESSION['user_id']); if ($fp !== '') $_SESSION['user_photo'] = $fp; }
 
 $flash = null;
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -23,9 +26,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $flash = updateUserSignature($_SESSION['user_id'], $_POST['signature']);
     } elseif ($action === 'update_photo' && !empty($_SESSION['user_id']) && isset($_POST['photo'])) {
         $flash = updateUserPhoto($_SESSION['user_id'], $_POST['photo']);
+    } elseif ($action === 'change_password' && !empty($_SESSION['user_id'])) {
+        $flash = changePassword(
+            $_SESSION['user_id'],
+            $_POST['current_password'] ?? '',
+            $_POST['new_password'] ?? '',
+            $_POST['confirm_password'] ?? ''
+        );
     }
     if ($flash) {
-        header('Location: admin_settings.php?msg=' . urlencode($flash['message']) . '&ok=' . ($flash['success'] ? '1' : '0'));
+        $redirect = 'admin_settings.php';
+        if (!empty($_POST['return_url']) && preg_match('/^[a-z0-9_\-\.]+\.php$/i', basename($_POST['return_url']))) {
+            $redirect = basename($_POST['return_url']);
+        }
+        header('Location: ' . $redirect . '?msg=' . urlencode($flash['message']) . '&ok=' . ($flash['success'] ? '1' : '0'));
         exit;
     }
 }
@@ -43,6 +57,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="admin-dashboard.css">
     <link rel="stylesheet" href="admin-offices.css">
+    <link rel="stylesheet" href="profile_modal_admin.css">
     <style>
     body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
     .dashboard-container { display: flex; min-height: 100vh; border-top: 3px solid #D4AF37; }
@@ -109,6 +124,16 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
     .signature-box { max-width: 320px; height: 120px; border: 1px dashed #cbd5e1; border-radius: 8px; background: #f8fafc; display: flex; align-items: center; justify-content: center; overflow: hidden; }
     .signature-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
     .signature-box.empty { color: #94a3b8; font-size: 0.9rem; }
+    .signature-zoom-trigger { cursor: pointer; transition: box-shadow 0.15s ease, border-color 0.15s ease; }
+    .signature-zoom-trigger:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-color: #94a3b8; }
+    .signature-zoom-overlay { position: fixed; inset: 0; z-index: 2010; background: rgba(15,23,42,0.92); display: none; align-items: center; justify-content: center; padding: 2rem; box-sizing: border-box; }
+    .signature-zoom-overlay[hidden] { display: none !important; }
+    .signature-zoom-overlay.signature-zoom-open { display: flex !important; }
+    .signature-zoom-close { position: absolute; top: 1rem; right: 1rem; width: 44px; height: 44px; border: none; background: rgba(255,255,255,0.15); color: #fff; font-size: 1.75rem; line-height: 1; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.15s, color 0.15s; }
+    .signature-zoom-close:hover { background: rgba(255,255,255,0.25); color: #fff; }
+    .signature-zoom-content { max-width: 85vw; max-height: 85vh; display: flex; align-items: center; justify-content: center; }
+    .signature-zoom-content img { max-width: 100%; max-height: 85vh; width: auto; height: auto; object-fit: contain; border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.4); background: #fff; padding: 1rem; }
+    .signature-zoom-content .signature-zoom-empty { color: #94a3b8; font-size: 1.1rem; }
     .settings-toast { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 1500; display: flex; align-items: center; gap: 12px; padding: 0.875rem 1rem; border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.15); max-width: 360px; }
     .settings-toast.success { background: #22c55e; color: #fff; }
     .settings-toast.error { background: #ef4444; color: #fff; }
@@ -175,7 +200,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                     </div>
                 </div>
                 <div class="account-dropdown" id="account-dropdown" role="menu" aria-label="Account menu">
-                    <button type="button" class="account-dropdown-item account-dropdown-profile" id="account-dropdown-profile" role="menuitem" onclick="window.location.href='admin_settings.php'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profile</button>
+                    <button type="button" class="account-dropdown-item account-dropdown-profile" id="account-dropdown-profile" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profile</button>
                     <a href="../index.php?logout=1" class="account-dropdown-item account-dropdown-signout" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Sign Out</a>
                 </div>
             </div>
@@ -222,7 +247,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                     <h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>E-Signature</h3>
                     <p class="card-desc">Your digital signature for document approvals</p>
                     <span class="signature-current-label">Current Signature:</span>
-                    <div class="signature-box <?= $userSignature === '' ? 'empty' : '' ?>">
+                    <div class="signature-box signature-zoom-trigger <?= $userSignature === '' ? 'empty' : '' ?>" id="signature-box-preview" role="button" tabindex="0" title="Click to enlarge" data-signature="<?= $userSignature !== '' ? htmlspecialchars($userSignature) : '' ?>">
                         <?php if ($userSignature !== ''): ?><img src="<?= htmlspecialchars($userSignature) ?>" alt="Your signature"><?php else: ?><span>No signature set</span><?php endif; ?>
                     </div>
                     <button type="button" class="profile-signature-btn" id="profile-update-signature-btn" style="margin-top:1rem;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>Update Signature</button>
@@ -264,6 +289,11 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
             </div>
         </div>
     </div>
+    <div class="signature-zoom-overlay" id="signature-zoom-overlay" aria-hidden="true" hidden>
+        <button type="button" class="signature-zoom-close" id="signature-zoom-close" aria-label="Close">&times;</button>
+        <div class="signature-zoom-content" id="signature-zoom-content"></div>
+    </div>
+    <?php include __DIR__ . '/_profile_modal_admin.php'; ?>
     <form method="post" id="signature-update-form" action="admin_settings.php" style="display:none;">
         <input type="hidden" name="action" value="update_signature">
         <input type="hidden" name="signature" id="signature-hidden-input">
@@ -273,23 +303,9 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
         <input type="hidden" name="photo" id="profile-photo-hidden-input">
     </form>
 
+    <script src="sidebar_admin.js"></script>
     <script>
     (function(){
-        var accountBtn = document.getElementById('sidebar-account-btn');
-        var accountDropdown = document.getElementById('account-dropdown');
-        if (accountBtn && accountDropdown) {
-            accountBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                var open = !accountDropdown.classList.contains('open');
-                accountDropdown.classList.toggle('open', open);
-                accountBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-            });
-            document.addEventListener('click', function() {
-                accountDropdown.classList.remove('open');
-                accountBtn.setAttribute('aria-expanded', 'false');
-            });
-            accountDropdown.addEventListener('click', function(e) { e.stopPropagation(); });
-        }
         var notifBtn = document.getElementById('notif-btn');
         var notifDropdown = document.getElementById('notif-dropdown');
         if (notifBtn && notifDropdown) {
@@ -388,6 +404,59 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
             var r = new FileReader();
             r.onload = function(){ hiddenInput.value = r.result; form.submit(); };
             r.readAsDataURL(fileInput.files[0]);
+        });
+    })();
+    (function(){
+        var signatureBox = document.getElementById('signature-box-preview');
+        var signatureZoomOverlay = document.getElementById('signature-zoom-overlay');
+        var signatureZoomContent = document.getElementById('signature-zoom-content');
+        var signatureZoomClose = document.getElementById('signature-zoom-close');
+
+        function openSignatureZoom(signatureSrc) {
+            if (!signatureZoomOverlay || !signatureZoomContent) return;
+            signatureZoomContent.innerHTML = '';
+            if (signatureSrc) {
+                var img = document.createElement('img');
+                img.src = signatureSrc;
+                img.alt = 'Your signature (enlarged)';
+                signatureZoomContent.appendChild(img);
+            } else {
+                var span = document.createElement('span');
+                span.className = 'signature-zoom-empty';
+                span.textContent = 'No signature set';
+                signatureZoomContent.appendChild(span);
+            }
+            signatureZoomOverlay.hidden = false;
+            signatureZoomOverlay.classList.add('signature-zoom-open');
+            signatureZoomOverlay.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeSignatureZoom() {
+            if (!signatureZoomOverlay) return;
+            signatureZoomOverlay.hidden = true;
+            signatureZoomOverlay.classList.remove('signature-zoom-open');
+            signatureZoomOverlay.setAttribute('aria-hidden', 'true');
+        }
+
+        if (signatureBox) {
+            signatureBox.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var sig = signatureBox.getAttribute('data-signature') || '';
+                openSignatureZoom(sig);
+            });
+            signatureBox.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openSignatureZoom(signatureBox.getAttribute('data-signature') || ''); }
+            });
+        }
+        if (signatureZoomClose) signatureZoomClose.addEventListener('click', closeSignatureZoom);
+        if (signatureZoomOverlay) {
+            signatureZoomOverlay.addEventListener('click', function(e) {
+                if (e.target === signatureZoomOverlay) closeSignatureZoom();
+            });
+        }
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && signatureZoomOverlay && !signatureZoomOverlay.hidden) closeSignatureZoom();
         });
     })();
     </script>

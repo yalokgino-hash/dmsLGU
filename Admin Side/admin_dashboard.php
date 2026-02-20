@@ -14,6 +14,9 @@ $userDepartment = $_SESSION['user_department'] ?? 'Not Assigned';
 $userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
 $sidebar_active = 'dashboard';
 
+if (!function_exists('getUserPhoto')) require_once __DIR__ . '/../Super Admin Side/_account_helpers.php';
+if (function_exists('getUserPhoto') && !empty($_SESSION['user_id'])) { $fp = getUserPhoto($_SESSION['user_id']); if ($fp !== '') $_SESSION['user_photo'] = $fp; }
+
 // Fetch document counts and recent docs from DB; fallback to placeholders
 $totalDocuments = 0;
 $pendingCount = 0;
@@ -66,6 +69,7 @@ try {
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="admin-dashboard.css">
     <link rel="stylesheet" href="admin-offices.css">
+    <link rel="stylesheet" href="profile_modal_admin.css">
     <style>
     body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
     .dashboard-container { display: flex; min-height: 100vh; border-top: 3px solid #D4AF37; }
@@ -290,6 +294,8 @@ try {
         </div>
     </div>
 
+    <?php include __DIR__ . '/_profile_modal_admin.php'; ?>
+    <script src="sidebar_admin.js"></script>
     <script>
     (function() {
         function updateSubtitle() {
@@ -303,22 +309,6 @@ try {
         }
         updateSubtitle();
         setInterval(updateSubtitle, 60000);
-
-        var accountBtn = document.getElementById('sidebar-account-btn');
-        var accountDropdown = document.getElementById('account-dropdown');
-        if (accountBtn && accountDropdown) {
-            accountBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                var open = !accountDropdown.classList.contains('open');
-                accountDropdown.classList.toggle('open', open);
-                accountBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-            });
-            document.addEventListener('click', function() {
-                accountDropdown.classList.remove('open');
-                accountBtn.setAttribute('aria-expanded', 'false');
-            });
-            accountDropdown.addEventListener('click', function(e) { e.stopPropagation(); });
-        }
 
         var notifBtn = document.getElementById('notif-btn');
         var notifDropdown = document.getElementById('notif-dropdown');
