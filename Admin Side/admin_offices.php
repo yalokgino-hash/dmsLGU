@@ -335,6 +335,7 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="admin-dashboard.css">
     <link rel="stylesheet" href="admin-offices.css">
+    <link rel="stylesheet" href="profile_modal_admin.css">
     <style>
     body { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
     .dashboard-container { display: flex; min-height: 100vh; border-top: 3px solid #D4AF37; }
@@ -784,24 +785,10 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
         <input type="hidden" name="office_id" id="delete-office-id">
     </form>
 
+    <?php include __DIR__ . '/_profile_modal_admin.php'; ?>
+    <script src="sidebar_admin.js"></script>
     <script>
     (function() {
-        var accountBtn = document.getElementById('sidebar-account-btn');
-        var accountDropdown = document.getElementById('account-dropdown');
-        if (accountBtn && accountDropdown) {
-            accountBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                var open = !accountDropdown.classList.contains('open');
-                accountDropdown.classList.toggle('open', open);
-                accountBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-            });
-            document.addEventListener('click', function() {
-                accountDropdown.classList.remove('open');
-                accountBtn.setAttribute('aria-expanded', 'false');
-            });
-            accountDropdown.addEventListener('click', function(e) { e.stopPropagation(); });
-        }
-
         var openAddOfficeBtn = document.getElementById('open-add-office-modal');
         var addOfficeModal = document.getElementById('add-office-modal');
         var addOfficeForm = document.getElementById('add-office-form');
@@ -1091,36 +1078,6 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
 
         if (editToast) {
             setTimeout(function() { editToast.classList.add('offices-toast-hide'); }, 3000);
-        }
-
-        // Account dropdown functionality
-        var accountBtn = document.getElementById('sidebar-account-btn');
-        var accountDropdown = document.getElementById('account-dropdown');
-        function closeAccountDropdown() {
-            if (accountDropdown) {
-                accountDropdown.classList.remove('open');
-                if (accountBtn) accountBtn.setAttribute('aria-expanded', 'false');
-            }
-        }
-        if (accountBtn && accountDropdown) {
-            accountBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                accountDropdown.classList.toggle('open');
-                accountBtn.setAttribute('aria-expanded', accountDropdown.classList.contains('open'));
-            });
-            accountBtn.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    accountDropdown.classList.add('open');
-                    accountBtn.setAttribute('aria-expanded', 'true');
-                }
-            });
-            document.addEventListener('click', function(e) {
-                if (!e.target.closest('.sidebar-user-wrap')) closeAccountDropdown();
-            });
-            document.addEventListener('keydown', function(e) {
-                if (e.key === 'Escape') closeAccountDropdown();
-            });
         }
 
         // Notification dropdown functionality
