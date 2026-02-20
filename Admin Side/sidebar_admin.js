@@ -66,29 +66,6 @@
             if (e.key === 'Escape' && profileOverlay && profileOverlay.classList.contains('profile-modal-open')) closeProfileModal();
         });
 
-        // Profile photo upload in modal: save to database via admin_settings.php
-        var photoInput = document.getElementById('profile-modal-photo-input');
-        var photoForm = document.getElementById('profile-modal-photo-form');
-        var photoHidden = document.getElementById('profile-modal-photo-hidden');
-        if (photoInput && photoForm && photoHidden) {
-            photoInput.addEventListener('change', function() {
-                if (!this.files || !this.files.length) return;
-                var file = this.files[0];
-                if (file.type.indexOf('image/') !== 0) {
-                    alert('Please choose an image file (PNG, JPG, or GIF).');
-                    this.value = '';
-                    return;
-                }
-                var reader = new FileReader();
-                reader.onload = function() {
-                    photoHidden.value = reader.result;
-                    photoForm.submit();
-                };
-                reader.readAsDataURL(file);
-                this.value = '';
-            });
-        }
-
         // Profile picture click to enlarge (zoom)
         var zoomOverlay = document.getElementById('profile-pic-zoom-overlay');
         var zoomContent = document.getElementById('profile-pic-zoom-content');
