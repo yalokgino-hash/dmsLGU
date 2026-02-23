@@ -69,48 +69,6 @@ if (!empty($_GET['download']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['download
     exit;
 }
 
-// Archive document and log to document history
-if (!empty($_GET['archive']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['archive'])) {
-    $archiveId = $_GET['archive'];
-    try {
-        $manager = new MongoDB\Driver\Manager($config['uri']);
-        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($archiveId)]);
-        $cursor = $manager->executeQuery($documentsNamespace, $query);
-        $docs = $cursor->toArray();
-        if (count($docs) > 0) {
-            $doc = (array)$docs[0];
-            $docCode = $doc['documentCode'] ?? $doc['document_code'] ?? '';
-            $docTitle = $doc['documentTitle'] ?? $doc['document_title'] ?? '';
-            $bulk = new MongoDB\Driver\BulkWrite;
-            $bulk->update(
-                ['_id' => new MongoDB\BSON\ObjectId($archiveId)],
-                ['$set' => ['status' => 'archived']],
-                ['multi' => false]
-            );
-            $manager->executeBulkWrite($documentsNamespace, $bulk);
-            $historyNamespace = $config['database'] . '.document_history';
-            $historyBulk = new MongoDB\Driver\BulkWrite;
-            $historyBulk->insert([
-                'documentId'    => $archiveId,
-                'documentCode'  => $docCode,
-                'documentTitle' => $docTitle,
-                'action'        => 'Archived',
-                'dateTime'      => new MongoDB\BSON\UTCDateTime(),
-                'userId'        => $_SESSION['user_id'] ?? '',
-                'userName'      => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
-            ]);
-            $manager->executeBulkWrite($historyNamespace, $historyBulk);
-            // Remove from "Received from Super Admin" list if it was there
-            $sentToAdminNamespace = $config['database'] . '.sent_to_admin';
-            $deleteBulk = new MongoDB\Driver\BulkWrite;
-            $deleteBulk->delete(['documentId' => $archiveId], ['limit' => 0]);
-            $manager->executeBulkWrite($sentToAdminNamespace, $deleteBulk);
-        }
-    } catch (Exception $e) {}
-    header('Location: documents.php');
-    exit;
-}
-
 // Send document to department head(s) (POST from Send modal – multiple allowed)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'send_to_head') {
     $docId = trim($_POST['document_id'] ?? '');
@@ -557,7 +515,6 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                                         <div class="documents-actions-row">
                                             <a href="documents.php?download=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-open" title="Download document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
                                             <button type="button" class="documents-action-btn documents-action-send" data-document-id="<?php echo htmlspecialchars($docId); ?>" data-open-send-modal title="Send document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send</button>
-                                            <a href="documents.php?archive=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-archive" title="Archive document" onclick="return confirm('Archive this document?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</a>
                                         </div>
                                     </td>
                                 </tr>

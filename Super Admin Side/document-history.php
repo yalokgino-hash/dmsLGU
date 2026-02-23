@@ -16,6 +16,28 @@ $userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
 $sidebar_active = 'document-history';
 $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['user_username'] ?? $userName) ?: 'User';
 
+$config = require __DIR__ . '/../config.php';
+$historyList = [];
+try {
+    $manager = new MongoDB\Driver\Manager($config['uri']);
+    $historyNamespace = $config['database'] . '.document_history';
+    $query = new MongoDB\Driver\Query([], ['sort' => ['dateTime' => -1], 'limit' => 500]);
+    $cursor = $manager->executeQuery($historyNamespace, $query);
+    foreach ($cursor as $row) {
+        $arr = (array)$row;
+        $arr['_id'] = (string)($arr['_id'] ?? '');
+        $dt = $arr['dateTime'] ?? null;
+        if ($dt instanceof MongoDB\BSON\UTCDateTime) {
+            $arr['dateTimeFormatted'] = $dt->toDateTime()->setTimezone(new DateTimeZone(date_default_timezone_get() ?: 'UTC'))->format('M j, Y g:i A');
+        } else {
+            $arr['dateTimeFormatted'] = '—';
+        }
+        $historyList[] = $arr;
+    }
+} catch (Exception $e) {
+    $historyList = [];
+}
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -103,9 +125,22 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
                                 </tr>
                             </thead>
                             <tbody id="history-table-body">
+                                <?php if (empty($historyList)): ?>
                                 <tr>
                                     <td colspan="6" class="offices-empty" id="no-history-row">No history yet.</td>
                                 </tr>
+                                <?php else: ?>
+                                <?php foreach ($historyList as $idx => $h): ?>
+                                <tr data-history-row>
+                                    <td><?= (int)($idx + 1) ?></td>
+                                    <td><?= htmlspecialchars($h['dateTimeFormatted'] ?? '—') ?></td>
+                                    <td><?= htmlspecialchars($h['action'] ?? '—') ?></td>
+                                    <td><?= htmlspecialchars($h['documentCode'] ?? '—') ?></td>
+                                    <td><?= htmlspecialchars($h['documentTitle'] ?? '—') ?></td>
+                                    <td><?= htmlspecialchars($h['userName'] ?? '—') ?></td>
+                                </tr>
+                                <?php endforeach; ?>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>

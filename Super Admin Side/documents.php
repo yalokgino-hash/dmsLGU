@@ -19,6 +19,49 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
 $config = require __DIR__ . '/../config.php';
 $documentsNamespace = $config['database'] . '.documents';
 $sentNamespace = $config['database'] . '.sent_to_super_admin';
+$notificationsNamespace = $config['database'] . '.notifications';
+
+// Mark notifications as read (redirect back)
+if (!empty($_GET['mark_notifications_read'])) {
+    $uid = $_SESSION['user_id'] ?? '';
+    if ($uid !== '') {
+        try {
+            $manager = new MongoDB\Driver\Manager($config['uri']);
+            $bulk = new MongoDB\Driver\BulkWrite;
+            $bulk->update(
+                ['userId' => $uid],
+                ['$set' => ['read' => true]],
+                ['multi' => true]
+            );
+            $manager->executeBulkWrite($notificationsNamespace, $bulk);
+        } catch (Exception $e) {}
+    }
+    header('Location: documents.php');
+    exit;
+}
+
+// View document (open in browser/new tab – inline)
+if (!empty($_GET['view']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['view'])) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($_GET['view'])]);
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        if (count($docs) > 0) {
+            $doc = (array)$docs[0];
+            $fileName = $doc['fileName'] ?? 'document.docx';
+            $fileContent = $doc['fileContent'] ?? '';
+            if ($fileContent !== '') {
+                header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+                header('Content-Disposition: inline; filename="' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName) . '"');
+                echo base64_decode($fileContent, true) ?: $fileContent;
+                exit;
+            }
+        }
+    } catch (Exception $e) {}
+    header('HTTP/1.1 404 Not Found');
+    exit;
+}
 
 // Download document (file stored in documents collection)
 if (!empty($_GET['download']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['download'])) {
@@ -74,9 +117,9 @@ if (!empty($_GET['send']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['send'])) {
     exit;
 }
 
-// Archive document and log to document history
-if (!empty($_GET['archive']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['archive'])) {
-    $archiveId = $_GET['archive'];
+// Case Close: same as archive – set status to archived, log to document history, remove from sent list
+if (!empty($_GET['case_close']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['case_close'])) {
+    $archiveId = $_GET['case_close'];
     try {
         $manager = new MongoDB\Driver\Manager($config['uri']);
         $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($archiveId)]);
@@ -99,19 +142,18 @@ if (!empty($_GET['archive']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['archive']
                 'documentId'    => $archiveId,
                 'documentCode'  => $docCode,
                 'documentTitle' => $docTitle,
-                'action'        => 'Archived',
+                'action'        => 'Case Close',
                 'dateTime'      => new MongoDB\BSON\UTCDateTime(),
                 'userId'        => $_SESSION['user_id'] ?? '',
                 'userName'      => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
             ]);
             $manager->executeBulkWrite($historyNamespace, $historyBulk);
-            // Remove from sent list so it disappears from Super Admin documents page
             $deleteBulk = new MongoDB\Driver\BulkWrite;
             $deleteBulk->delete(['documentId' => $archiveId], ['limit' => 0]);
             $manager->executeBulkWrite($sentNamespace, $deleteBulk);
         }
     } catch (Exception $e) {}
-    header('Location: documents.php');
+    header('Location: documents.php?case_closed=1');
     exit;
 }
 
@@ -147,6 +189,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         'status'        => 'active',
                     ]);
                     $manager->executeBulkWrite($documentsNamespace, $bulk);
+                    // Notify: document added
+                    $notifBulk = new MongoDB\Driver\BulkWrite;
+                    $notifBulk->insert([
+                        'userId'    => $_SESSION['user_id'] ?? '',
+                        'message'   => 'Document "' . $documentTitle . '" was added.',
+                        'read'      => false,
+                        'createdAt' => new MongoDB\BSON\UTCDateTime(),
+                    ]);
+                    $manager->executeBulkWrite($notificationsNamespace, $notifBulk);
                     header('Location: documents.php?added=1');
                     exit;
                 } catch (Exception $e) {
@@ -212,8 +263,34 @@ try {
     $sentList = [];
 }
 
+$notifications = [];
+$notifCount = 0;
+$currentUserId = $_SESSION['user_id'] ?? '';
+if ($currentUserId !== '') {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $notifQuery = new MongoDB\Driver\Query(
+            ['userId' => $currentUserId],
+            ['sort' => ['createdAt' => -1], 'limit' => 20]
+        );
+        $notifCursor = $manager->executeQuery($notificationsNamespace, $notifQuery);
+        foreach ($notifCursor as $n) {
+            $arr = (array)$n;
+            $notifications[] = [
+                'message'   => $arr['message'] ?? '',
+                'read'      => !empty($arr['read']),
+                'createdAt' => $arr['createdAt'] ?? null,
+            ];
+        }
+        foreach ($notifications as $n) {
+            if (empty($n['read'])) $notifCount++;
+        }
+    } catch (Exception $e) {}
+}
+
 $showSentToast = isset($_GET['sent']) && $_GET['sent'] === '1';
 $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
+$showCaseClosedToast = isset($_GET['case_closed']) && $_GET['case_closed'] === '1';
 
 ?>
 <!DOCTYPE html>
@@ -242,8 +319,12 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
         .icon-btn svg, .avatar-btn svg { width: 22px; height: 22px; }
         .notif-badge { position: absolute; top: 8px; right: 8px; background: #ef4444; color: white; font-size: 12px; padding: 4px 8px; border-radius: 999px; line-height: 1; }
         .avatar-btn { width: 40px; height: 40px; padding: 0; border-radius: 10px; }
-        .notif-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 180px; border-radius: 6px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 8px 0; }
-        .notif-item { padding: 10px 12px; font-size: 0.95rem; color: #475569; }
+        .notif-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 220px; max-width: 320px; max-height: 360px; overflow-y: auto; border-radius: 8px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 0; }
+        .notif-dropdown-header { padding: 10px 12px; font-size: 0.85rem; font-weight: 600; color: #0b1720; border-bottom: 1px solid #e6eef8; }
+        .notif-item { padding: 10px 12px; font-size: 0.95rem; color: #475569; border-bottom: 1px solid #f1f5f9; }
+        .notif-item:last-child { border-bottom: none; }
+        .notif-item.notif-mark-read { display: block; color: #3B82F6; text-decoration: none; font-weight: 500; }
+        .notif-item.notif-mark-read:hover { background: rgba(59, 130, 246, 0.08); }
         .main-content .admin-content-body { padding-top: 24px; }
         .documents-actions-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .documents-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s; text-decoration: none; color: inherit; }
@@ -254,12 +335,20 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
         .documents-action-archive:hover { background: #fde68a; color: #b45309; }
         .documents-action-send { background: #d1fae5; color: #047857; }
         .documents-action-send:hover { background: #a7f3d0; color: #047857; }
+        .documents-action-view { background: #e0e7ff; color: #4338ca; }
+        .documents-action-view:hover { background: #c7d2fe; color: #4338ca; }
+        .send-dropdown-btn { cursor: pointer; }
+        /* Send choices dropdown: rendered outside table, fixed position */
+        #send-choices-dropdown { position: fixed; background: #fff; border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.12); border: 1px solid #e6eef8; min-width: 160px; padding: 6px 0; z-index: 2000; }
+        #send-choices-dropdown[hidden] { display: none !important; }
+        .send-dropdown-item { display: flex; align-items: center; width: 100%; padding: 10px 14px; border: none; background: none; color: #1e293b; font-size: 0.9rem; cursor: pointer; text-align: left; font-family: inherit; box-sizing: border-box; }
+        .send-dropdown-item:hover { background: #f1f5f9; }
         .document-status { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
         .document-status-active { background: #d1fae5; color: #047857; }
         .document-status-archived { background: #f3f4f6; color: #6b7280; }
     </style>
 </head>
-<body<?php if (!empty($showSentToast)): ?> data-sent="1"<?php endif; ?><?php if (!empty($showAddedToast)): ?> data-added="1"<?php endif; ?><?php if (!empty($addError)): ?> data-add-error="1"<?php endif; ?>>
+<body<?php if (!empty($showSentToast)): ?> data-sent="1"<?php endif; ?><?php if (!empty($showAddedToast)): ?> data-added="1"<?php endif; ?><?php if (!empty($showCaseClosedToast)): ?> data-case-closed="1"<?php endif; ?><?php if (!empty($addError)): ?> data-add-error="1"<?php endif; ?>>
     <div class="dashboard-container">
         <?php include __DIR__ . '/_sidebar_super_admin.php'; ?>
 
@@ -274,10 +363,20 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
                         <div class="header-controls">
                             <button class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
                                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                                <span class="notif-badge" id="notif-count" aria-hidden="true">3</span>
+                                <?php if ($notifCount > 0): ?><span class="notif-badge" id="notif-count" aria-hidden="true"><?= (int)$notifCount ?></span><?php else: ?><span class="notif-badge" id="notif-count" aria-hidden="true" hidden>0</span><?php endif; ?>
                             </button>
-                            <div class="notif-dropdown" id="notif-dropdown" aria-hidden="true">
+                            <div class="notif-dropdown" id="notif-dropdown" aria-hidden="true" role="menu" aria-label="Notifications">
+                                <div class="notif-dropdown-header">Notifications</div>
+                                <?php if (empty($notifications)): ?>
                                 <div class="notif-item">No new notifications</div>
+                                <?php else: ?>
+                                <?php foreach ($notifications as $notif): ?>
+                                <div class="notif-item"><?= htmlspecialchars($notif['message']) ?></div>
+                                <?php endforeach; ?>
+                                <?php if ($notifCount > 0): ?>
+                                <a href="documents.php?mark_notifications_read=1" class="notif-item notif-mark-read">Mark all as read</a>
+                                <?php endif; ?>
+                                <?php endif; ?>
                             </div>
                         </div>
                         <div class="header-controls">
@@ -336,8 +435,8 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
                                     <td>
                                         <div class="documents-actions-row">
                                             <a href="documents.php?download=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-open" title="Download document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
-                                            <a href="documents.php?send=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-send" title="Send to Admin" onclick="return confirm('Send this document to Admin?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Admin</a>
-                                            <a href="documents.php?archive=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-archive" title="Archive document" onclick="return confirm('Archive this document?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</a>
+                                            <button type="button" class="documents-action-btn documents-action-send send-dropdown-btn" title="Send" data-document-id="<?= htmlspecialchars($docId) ?>" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send</button>
+                                            <a href="documents.php?view=<?= urlencode($docId) ?>" target="_blank" class="documents-action-btn documents-action-view" title="View file"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>View</a>
                                         </div>
                                     </td>
                                 </tr>
@@ -382,6 +481,13 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
     </div>
 
     <?php include __DIR__ . '/_profile_modal_super_admin.php'; ?>
+
+    <!-- Send choices: outside table/modal, appended to body so not clipped -->
+    <div id="send-choices-dropdown" role="menu" aria-label="Send options" hidden>
+        <button type="button" class="send-dropdown-item" data-action="endorse">Endorse</button>
+        <button type="button" class="send-dropdown-item" data-action="table">Table</button>
+        <button type="button" class="send-dropdown-item" data-action="close">Case Close</button>
+    </div>
 
     <script>
     (function() {
@@ -456,10 +562,65 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
             setTimeout(function() { toast.remove(); }, 4000);
         }
 
+        if (document.body.getAttribute('data-case-closed') === '1') {
+            var toast = document.createElement('div');
+            toast.setAttribute('role', 'status');
+            toast.textContent = 'Document case closed.';
+            toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:1600;padding:0.75rem 1.25rem;background:#22c55e;color:#fff;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,0.15);';
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 4000);
+        }
+
         if (addModal && document.body.getAttribute('data-add-error') === '1') {
             addModal.hidden = false;
             document.body.classList.add('modal-open');
         }
+
+        // Send choices: dropdown is outside table (body-level), positioned next to Send button
+        var sendChoicesDropdown = document.getElementById('send-choices-dropdown');
+        var activeSendDocId = null;
+        function closeSendChoices() {
+            if (sendChoicesDropdown) sendChoicesDropdown.hidden = true;
+            document.querySelectorAll('.send-dropdown-btn').forEach(function(btn) { btn.setAttribute('aria-expanded', 'false'); });
+            activeSendDocId = null;
+        }
+        document.querySelectorAll('.send-dropdown-btn').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!sendChoicesDropdown) return;
+                var wasOpen = this.getAttribute('aria-expanded') === 'true';
+                closeSendChoices();
+                if (wasOpen) return;
+                var rect = this.getBoundingClientRect();
+                activeSendDocId = this.getAttribute('data-document-id') || '';
+                sendChoicesDropdown.style.left = rect.left + 'px';
+                sendChoicesDropdown.style.top = (rect.bottom + 4) + 'px';
+                sendChoicesDropdown.hidden = false;
+                this.setAttribute('aria-expanded', 'true');
+            });
+        });
+        if (sendChoicesDropdown) {
+            sendChoicesDropdown.querySelectorAll('.send-dropdown-item').forEach(function(item) {
+                item.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    var action = this.getAttribute('data-action');
+                    if (action === 'close') {
+                        if (activeSendDocId) {
+                            window.location = 'documents.php?case_close=' + encodeURIComponent(activeSendDocId);
+                        } else {
+                            closeSendChoices();
+                        }
+                    } else if (action === 'endorse' || action === 'table') {
+                        closeSendChoices();
+                    }
+                });
+            });
+        }
+        document.addEventListener('click', function() { closeSendChoices(); });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeSendChoices();
+        });
     })();
     </script>
     <script>
