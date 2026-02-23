@@ -283,8 +283,6 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
         .documents-action-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
         .documents-action-open { background: #dbeafe; color: #1d4ed8; }
         .documents-action-open:hover { background: #bfdbfe; color: #1d4ed8; }
-        .documents-action-archive { background: #fef3c7; color: #b45309; }
-        .documents-action-archive:hover { background: #fde68a; color: #b45309; }
         .documents-action-send { background: #d1fae5; color: #047857; }
         .documents-action-send:hover { background: #a7f3d0; color: #047857; }
         .document-status { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
@@ -388,7 +386,6 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
                                         <div class="documents-actions-row">
                                             <a href="documents.php?view=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-open document-view-trigger" data-doc-id="<?= htmlspecialchars($docId) ?>" data-doc-name="<?= htmlspecialchars($sent['fileName'] ?? 'document.docx') ?>" title="View document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>View</a>
                                             <a href="documents.php?send=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-send" title="Send to Admin" onclick="return confirm('Send this document to Admin?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Admin</a>
-                                            <a href="documents.php?archive=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-archive" title="Archive document" onclick="return confirm('Archive this document?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</a>
                                         </div>
                                     </td>
                                 </tr>
