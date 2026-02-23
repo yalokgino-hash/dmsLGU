@@ -38,7 +38,7 @@ if ($userUsername === '') $userUsername = 'User';
     </nav>
     <div class="sidebar-user-wrap">
         <div class="sidebar-user" id="sidebar-account-btn" role="button" tabindex="0" aria-label="Account menu" aria-haspopup="true" aria-expanded="false">
-            <div class="sidebar-user-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
+            <div class="sidebar-user-avatar profile-photo-view-trigger" role="button" tabindex="0" title="Click to view"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
             <div class="sidebar-user-info">
                 <p class="sidebar-user-name"><?php echo htmlspecialchars($userUsername); ?></p>
                 <p class="sidebar-user-role"><?php echo htmlspecialchars($userRole); ?></p>

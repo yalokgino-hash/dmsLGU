@@ -443,6 +443,12 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
         .offices-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
         .offices-btn-secondary { background: #64748b; color: #fff; }
         .offices-btn-secondary:hover { background: #475569; color: #fff; }
+        .dept-card-clickable { cursor: pointer; }
+        .dept-view-modal-content { max-width: 480px; }
+        .dept-view-modal-content .offices-field { margin-bottom: 1rem; }
+        .dept-view-modal-content .view-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 0.25rem 0; }
+        .dept-view-modal-content .view-value { font-size: 1rem; color: #1e293b; margin: 0 0 0.5rem 0; line-height: 1.4; }
+        .dept-view-modal-content .view-value.desc { white-space: pre-wrap; }
         @media (max-width: 1024px) { .dept-cards-grid { grid-template-columns: repeat(2, 1fr); } }
         @media (max-width: 768px) { .dept-cards-grid { grid-template-columns: 1fr; } .dept-page-header { flex-direction: column; align-items: stretch; } }
     </style>
@@ -515,7 +521,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                         $desc = trim($o['description'] ?? '');
                         $descDisplay = $desc !== '' ? $desc : 'Municipal department';
                     ?>
-                    <article class="dept-card">
+                    <article class="dept-card dept-card-clickable" data-name="<?= htmlspecialchars($o['office_name'] ?? '') ?>" data-code="<?= htmlspecialchars($o['office_code'] ?? '') ?>" data-desc="<?= htmlspecialchars($descDisplay) ?>" data-head="<?= htmlspecialchars($head !== '' ? $head : 'Not assigned') ?>" data-created="<?= htmlspecialchars($createdAt) ?>" onclick="openViewModalFromCard(this)">
                         <div class="dept-card-header">
                             <div class="dept-card-header-left">
                                 <div class="dept-card-icon">
@@ -526,7 +532,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                                     <p class="dept-card-code"><?= htmlspecialchars($o['office_code'] ?? '') ?></p>
                                 </div>
                             </div>
-                            <div class="dept-card-menu">
+                            <div class="dept-card-menu" onclick="event.stopPropagation()">
                                 <button type="button" class="dept-card-menu-btn" aria-label="Options" onclick="toggleCardMenu(this)">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
                                 </button>
@@ -550,6 +556,39 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                     </article>
                     <?php endforeach; ?>
                     <?php endif; ?>
+                </div>
+            </div>
+
+            <!-- View Department Modal -->
+            <div id="modal-view" class="offices-modal" style="display:none;">
+                <div class="offices-modal-overlay" onclick="closeViewModal()"></div>
+                <div class="offices-modal-content dept-view-modal-content">
+                    <button type="button" class="offices-modal-close" onclick="closeViewModal()" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>
+                    <h3 id="view-modal-title">Department Details</h3>
+                    <p class="offices-modal-subtitle">View department information.</p>
+                    <div class="offices-field">
+                        <p class="view-label">Department Name</p>
+                        <p class="view-value" id="view-name">—</p>
+                    </div>
+                    <div class="offices-field">
+                        <p class="view-label">Department Code</p>
+                        <p class="view-value" id="view-code">—</p>
+                    </div>
+                    <div class="offices-field">
+                        <p class="view-label">Description</p>
+                        <p class="view-value desc" id="view-desc">—</p>
+                    </div>
+                    <div class="offices-field">
+                        <p class="view-label">Department Head</p>
+                        <p class="view-value" id="view-head">—</p>
+                    </div>
+                    <div class="offices-field">
+                        <p class="view-label">Created</p>
+                        <p class="view-value" id="view-created">—</p>
+                    </div>
+                    <div class="offices-modal-actions">
+                        <button type="button" class="offices-btn offices-btn-secondary" onclick="closeViewModal()">Close</button>
+                    </div>
                 </div>
             </div>
 
@@ -581,7 +620,6 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                 </div>
             </div>
 
-            <!-- Edit Department Modal -->
             <div id="modal-edit" class="offices-modal" style="display:none;">
                 <div class="offices-modal-overlay" onclick="closeEditModal()"></div>
                 <div class="offices-modal-content">
@@ -603,7 +641,6 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                 </div>
             </div>
 
-            <!-- Assign Head Modal -->
             <div id="modal-assign-head" class="offices-modal" style="display:none;">
                 <div class="offices-modal-overlay" onclick="closeAssignHeadModal()"></div>
                 <div class="offices-modal-content">
@@ -653,6 +690,16 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
             })();
             function openAddModal() { document.getElementById('modal-add').style.display = 'flex'; }
             function closeAddModal() { document.getElementById('modal-add').style.display = 'none'; }
+            function openViewModalFromCard(card) {
+                var d = card.dataset || {};
+                document.getElementById('view-name').textContent = d.name || '—';
+                document.getElementById('view-code').textContent = d.code || '—';
+                document.getElementById('view-desc').textContent = d.desc || '—';
+                document.getElementById('view-head').textContent = d.head || '—';
+                document.getElementById('view-created').textContent = d.created || '—';
+                document.getElementById('modal-view').style.display = 'flex';
+            }
+            function closeViewModal() { document.getElementById('modal-view').style.display = 'none'; }
             function openEditModal(btn) {
                 var d = btn.dataset || {};
                 document.getElementById('edit-office-id').value = d.id || '';
@@ -752,7 +799,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                     <h3>Profile Photo</h3>
                     <p class="profile-info-desc">Your avatar shown in the sidebar and across the app</p>
                     <div class="profile-photo-row">
-                        <div class="profile-photo-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
+                        <div class="profile-photo-avatar profile-photo-view-trigger" role="button" tabindex="0" data-photo="" title="Click to view"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
                         <div class="profile-photo-actions">
                             <label class="profile-signature-btn" for="profile-photo-file-input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Upload Photo</label>
                             <input type="file" id="profile-photo-file-input" accept="image/png,image/jpeg,image/jpg,image/gif" style="display:none;">
