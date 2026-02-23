@@ -100,9 +100,100 @@ if (!empty($_GET['archive']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['archive']
                 'userName'      => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
             ]);
             $manager->executeBulkWrite($historyNamespace, $historyBulk);
+            // Remove from "Received from Super Admin" list if it was there
+            $sentToAdminNamespace = $config['database'] . '.sent_to_admin';
+            $deleteBulk = new MongoDB\Driver\BulkWrite;
+            $deleteBulk->delete(['documentId' => $archiveId], ['limit' => 0]);
+            $manager->executeBulkWrite($sentToAdminNamespace, $deleteBulk);
         }
     } catch (Exception $e) {}
     header('Location: documents.php');
+    exit;
+}
+
+// Send document to department head(s) (POST from Send modal – multiple allowed)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'send_to_head') {
+    $docId = trim($_POST['document_id'] ?? '');
+    $officeIds = isset($_POST['office_id']) ? (is_array($_POST['office_id']) ? $_POST['office_id'] : [$_POST['office_id']]) : [];
+    $officeIds = array_filter(array_map('trim', $officeIds));
+    $officeIds = array_values(array_unique($officeIds));
+    if (preg_match('/^[a-f0-9]{24}$/i', $docId) && count($officeIds) > 0) {
+        try {
+            $manager = new MongoDB\Driver\Manager($config['uri']);
+            $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($docId)]);
+            $cursor = $manager->executeQuery($documentsNamespace, $query);
+            $docs = $cursor->toArray();
+            if (count($docs) > 0) {
+                $doc = (array)$docs[0];
+                $officesNamespace = $config['database'] . '.' . ($config['collection'] ?? 'offices');
+                $sentNamespace = $config['database'] . '.sent_to_department_heads';
+                $bulk = new MongoDB\Driver\BulkWrite;
+                $sentCount = 0;
+                foreach ($officeIds as $officeId) {
+                    if (!preg_match('/^[a-f0-9]{24}$/i', $officeId)) continue;
+                    $oq = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($officeId)]);
+                    $oCursor = $manager->executeQuery($officesNamespace, $oq);
+                    $offices = $oCursor->toArray();
+                    if (count($offices) > 0) {
+                        $office = (array)$offices[0];
+                        $officeHeadId = $office['office_head_id'] ?? '';
+                        $officeHeadName = $office['office_head'] ?? '';
+                        $officeName = $office['office_name'] ?? $office['department'] ?? $office['office_code'] ?? 'Department';
+                        if ($officeHeadId !== '' || $officeHeadName !== '') {
+                            $bulk->insert([
+                                'documentId'      => $docId,
+                                'officeId'        => $officeId,
+                                'officeName'      => $officeName,
+                                'officeHeadId'    => $officeHeadId,
+                                'officeHeadName'  => $officeHeadName,
+                                'sentAt'          => new MongoDB\BSON\UTCDateTime(),
+                                'sentByUserId'    => $_SESSION['user_id'] ?? '',
+                                'sentByUserName'  => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+                            ]);
+                            $sentCount++;
+                        }
+                    }
+                }
+                if ($sentCount > 0) {
+                    $manager->executeBulkWrite($sentNamespace, $bulk);
+                    header('Location: documents.php?sent_head=1&count=' . (int)$sentCount);
+                    exit;
+                }
+            }
+        } catch (Exception $e) {}
+    }
+    header('Location: documents.php?send_error=1');
+    exit;
+}
+
+// Send document to Super Admin Side (legacy GET – Send button now opens modal for department heads)
+if (!empty($_GET['send']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['send'])) {
+    $sendId = $_GET['send'];
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($sendId)]);
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        if (count($docs) > 0) {
+            $doc = (array)$docs[0];
+            $docCode = $doc['documentCode'] ?? $doc['document_code'] ?? '';
+            $docTitle = $doc['documentTitle'] ?? $doc['document_title'] ?? '';
+            $fileName = $doc['fileName'] ?? $doc['file_name'] ?? 'document.docx';
+            $sentNamespace = $config['database'] . '.sent_to_super_admin';
+            $bulk = new MongoDB\Driver\BulkWrite;
+            $bulk->insert([
+                'documentId'     => $sendId,
+                'documentCode'   => $docCode,
+                'documentTitle'  => $docTitle,
+                'fileName'       => $fileName,
+                'sentAt'         => new MongoDB\BSON\UTCDateTime(),
+                'sentByUserId'   => $_SESSION['user_id'] ?? '',
+                'sentByUserName' => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+            ]);
+            $manager->executeBulkWrite($sentNamespace, $bulk);
+        }
+    } catch (Exception $e) {}
+    header('Location: documents.php?sent=1');
     exit;
 }
 
@@ -182,7 +273,55 @@ try {
     $documentsList = [];
 }
 
+// Department heads (offices with assigned head) for Send document modal
+$departmentHeadsList = [];
+try {
+    $officesNamespace = $config['database'] . '.' . ($config['collection'] ?? 'offices');
+    $manager = new MongoDB\Driver\Manager($config['uri']);
+    $query = new MongoDB\Driver\Query([], ['sort' => ['office_name' => 1]]);
+    $cursor = $manager->executeQuery($officesNamespace, $query);
+    foreach ($cursor as $doc) {
+        $d = (array)$doc;
+        $headId = trim($d['office_head_id'] ?? '');
+        $headName = trim($d['office_head'] ?? '');
+        if ($headId !== '' || $headName !== '') {
+            $departmentHeadsList[] = [
+                'id'             => (string)($d['_id'] ?? ''),
+                'office_name'    => $d['office_name'] ?? $d['department'] ?? $d['name'] ?? $d['office_code'] ?? '—',
+                'office_head'    => $headName !== '' ? $headName : '—',
+                'office_head_id' => $headId,
+            ];
+        }
+    }
+} catch (Exception $e) {
+    $departmentHeadsList = [];
+}
+
+// Merge in documents sent from Super Admin: show them in the same Documents table
+$sentToAdminNamespace = $config['database'] . '.sent_to_admin';
+$idsInList = array_column($documentsList, '_id');
+$idsInList = array_flip(array_filter($idsInList));
+try {
+    $query = new MongoDB\Driver\Query([], ['sort' => ['sentAt' => -1], 'limit' => 500]);
+    $cursor = $manager->executeQuery($sentToAdminNamespace, $query);
+    foreach ($cursor as $row) {
+        $arr = (array)$row;
+        $docId = (string)($arr['documentId'] ?? '');
+        if ($docId === '' || isset($idsInList[$docId])) continue;
+        $idsInList[$docId] = true;
+        $documentsList[] = [
+            '_id'            => $docId,
+            'documentCode'  => $arr['documentCode'] ?? $arr['document_code'] ?? '—',
+            'documentTitle' => $arr['documentTitle'] ?? $arr['document_title'] ?? '—',
+            'fileName'       => $arr['fileName'] ?? $arr['file_name'] ?? 'document.docx',
+        ];
+    }
+} catch (Exception $e) {}
+
 $added = isset($_GET['added']) && $_GET['added'] === '1';
+$sent = isset($_GET['sent']) && $_GET['sent'] === '1';
+$sentHead = isset($_GET['sent_head']) && $_GET['sent_head'] === '1';
+$sentHeadCount = isset($_GET['count']) ? (int)$_GET['count'] : 0;
 if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
     $addError = $_SESSION['documents_add_error'];
     unset($_SESSION['documents_add_error']);
@@ -267,6 +406,10 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
     .documents-table thead th { text-align: left; padding: 14px 16px; font-size: 13px; font-weight: 600; letter-spacing: 0.03em; color: #475569; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
     .documents-table tbody td { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; color: #334155; font-size: 14px; }
     .documents-empty { text-align: center; height: 200px; color: #64748b; vertical-align: middle; }
+    .document-status { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+    .document-status-active { background: #d1fae5; color: #047857; }
+    .document-status-archived { background: #f3f4f6; color: #6b7280; }
+    .document-status-received { background: #dbeafe; color: #1d4ed8; }
     .documents-actions-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .documents-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s; }
     .documents-action-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
@@ -274,10 +417,32 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
     .documents-action-open:hover { background: #bfdbfe; color: #1d4ed8; }
     .documents-action-archive { background: #fef3c7; color: #b45309; }
     .documents-action-archive:hover { background: #fde68a; color: #b45309; }
+    .documents-action-send { background: #d1fae5; color: #047857; }
+    .documents-action-send:hover { background: #a7f3d0; color: #047857; }
+    #send-document-modal .doc-modal-dialog { max-width: 440px; }
+    .send-modal-subtitle { margin: 0 0 1rem 0; font-size: 0.9rem; color: #64748b; line-height: 1.45; }
+    .send-heads-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
+    .send-heads-toolbar-links { display: flex; gap: 12px; font-size: 13px; }
+    .send-heads-toolbar-links button { background: none; border: none; color: #3B82F6; cursor: pointer; padding: 0; font-family: inherit; font-size: inherit; font-weight: 500; }
+    .send-heads-toolbar-links button:hover { text-decoration: underline; color: #2563eb; }
+    .send-heads-toolbar-count { font-size: 13px; color: #64748b; font-weight: 500; }
+    .send-heads-list { max-height: 320px; overflow-y: auto; padding-right: 4px; }
+    .send-heads-list::-webkit-scrollbar { width: 6px; }
+    .send-heads-list::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 3px; }
+    .send-heads-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .send-head-row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: background 0.2s, border-color 0.2s, box-shadow 0.2s; }
+    .send-head-row:hover { background: #f8fafc; border-color: #cbd5e1; }
+    .send-head-row.selected { background: #ecfdf5; border-color: #10b981; box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2); }
+    .send-head-row input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: #10b981; cursor: pointer; }
+    .send-head-row-content { flex: 1; min-width: 0; }
+    .send-head-office { display: block; font-weight: 600; color: #1e293b; font-size: 0.95rem; margin-bottom: 2px; }
+    .send-head-name { display: block; color: #64748b; font-size: 0.875rem; }
+    .send-modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; }
+    .send-modal-actions .doc-btn-save { min-width: 120px; }
     @media (max-width: 980px) { .documents-tools { grid-template-columns: 1fr 1fr; } }
     </style>
 </head>
-<body<?php if (!empty($addError)): ?> data-add-error="1"<?php endif; ?><?php if (!empty($added)): ?> data-added="1"<?php endif; ?>>
+<body<?php if (!empty($addError)): ?> data-add-error="1"<?php endif; ?><?php if (!empty($added)): ?> data-added="1"<?php endif; ?><?php if (!empty($sent)): ?> data-sent="1"<?php endif; ?><?php if (!empty($sentHead)): ?> data-sent-head="1" data-sent-head-count="<?php echo (int)$sentHeadCount; ?>"<?php endif; ?>>
     <div class="dashboard-container">
         <aside class="sidebar">
             <div class="sidebar-header">
@@ -364,13 +529,14 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                                     <th>DOCUMENT CODE</th>
                                     <th>DOCUMENT TITLE</th>
                                     <th>DOCX FILE</th>
+                                    <th>STATUS</th>
                                     <th>ACTION</th>
                                 </tr>
                             </thead>
                             <tbody id="documents-table-body">
                                 <?php if (empty($documentsList)): ?>
                                 <tr>
-                                    <td colspan="5" class="documents-empty" id="no-documents-row">No documents yet.</td>
+                                    <td colspan="6" class="documents-empty" id="no-documents-row">No documents yet.</td>
                                 </tr>
                                 <?php else: ?>
                                 <?php foreach ($documentsList as $idx => $doc): ?>
@@ -379,15 +545,18 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                                     $docCode = htmlspecialchars($doc['documentCode'] ?? $doc['document_code'] ?? '—');
                                     $docTitle = htmlspecialchars($doc['documentTitle'] ?? $doc['document_title'] ?? '—');
                                     $docFileName = htmlspecialchars($doc['fileName'] ?? $doc['file_name'] ?? '—');
+                                    $docStatus = isset($doc['status']) ? ucfirst(strtolower($doc['status'])) : 'Active';
                                 ?>
                                 <tr data-document-row data-document-id="<?php echo htmlspecialchars($docId); ?>">
                                     <td><?php echo (int)($idx + 1); ?></td>
                                     <td><?php echo $docCode; ?></td>
                                     <td><?php echo $docTitle; ?></td>
                                     <td><a href="documents.php?download=<?php echo urlencode($docId); ?>" class="doc-file-link"><?php echo $docFileName; ?></a></td>
+                                    <td><span class="document-status document-status-<?php echo strtolower(htmlspecialchars($docStatus)); ?>"><?php echo htmlspecialchars($docStatus); ?></span></td>
                                     <td>
                                         <div class="documents-actions-row">
-                                            <a href="documents.php?view=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-open" title="View document" target="_blank"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>Open</a>
+                                            <a href="documents.php?download=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-open" title="Download document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
+                                            <button type="button" class="documents-action-btn documents-action-send" data-document-id="<?php echo htmlspecialchars($docId); ?>" data-open-send-modal title="Send document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send</button>
                                             <a href="documents.php?archive=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-archive" title="Archive document" onclick="return confirm('Archive this document?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</a>
                                         </div>
                                     </td>
@@ -427,6 +596,49 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                 <div class="doc-modal-actions">
                     <button type="button" class="doc-btn doc-btn-cancel" data-close-add-document>Cancel</button>
                     <button type="submit" class="doc-btn doc-btn-save">Save Document</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="doc-modal" id="send-document-modal" hidden>
+        <button type="button" class="doc-modal-overlay" data-close-send-document aria-label="Close"></button>
+        <div class="doc-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="send-document-title">
+            <div class="doc-modal-header">
+                <h2 id="send-document-title">Send document</h2>
+                <button type="button" class="doc-modal-close" data-close-send-document aria-label="Close">&times;</button>
+            </div>
+            <p class="send-modal-subtitle">Select one or more department heads to send this document to.</p>
+            <form method="post" action="documents.php" id="send-document-form" class="doc-modal-form">
+                <input type="hidden" name="action" value="send_to_head">
+                <input type="hidden" name="document_id" id="send-document-id" value="">
+                <?php if (!empty($departmentHeadsList)): ?>
+                <div class="send-heads-toolbar">
+                    <span class="send-heads-toolbar-count" id="send-selection-count">0 selected</span>
+                    <div class="send-heads-toolbar-links">
+                        <button type="button" id="send-select-all" aria-label="Select all">Select all</button>
+                        <button type="button" id="send-clear-all" aria-label="Clear selection">Clear</button>
+                    </div>
+                </div>
+                <?php endif; ?>
+                <div class="send-heads-list" id="send-heads-list">
+                    <?php if (empty($departmentHeadsList)): ?>
+                    <p class="documents-empty" style="padding: 1.25rem; color: #64748b; text-align: center; margin: 0;">No department heads assigned yet. Assign heads in <strong>Departments</strong> first.</p>
+                    <?php else: ?>
+                    <?php foreach ($departmentHeadsList as $head): ?>
+                    <label class="send-head-row" data-send-head>
+                        <input type="checkbox" name="office_id[]" value="<?php echo htmlspecialchars($head['id']); ?>" class="send-head-cb">
+                        <span class="send-head-row-content">
+                            <span class="send-head-office"><?php echo htmlspecialchars($head['office_name']); ?></span>
+                            <span class="send-head-name"><?php echo htmlspecialchars($head['office_head']); ?></span>
+                        </span>
+                    </label>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+                <div class="send-modal-actions">
+                    <button type="button" class="doc-btn doc-btn-cancel" data-close-send-document>Cancel</button>
+                    <button type="submit" class="doc-btn doc-btn-save" id="send-submit-btn" <?php if (empty($departmentHeadsList)): ?>disabled<?php endif; ?>>Send</button>
                 </div>
             </form>
         </div>
@@ -521,6 +733,97 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
             document.body.appendChild(toast);
             setTimeout(function() { toast.remove(); }, 4000);
         }
+        // Show success message when document was sent to Super Admin
+        if (document.body.getAttribute('data-sent') === '1') {
+            var toast = document.createElement('div');
+            toast.className = 'documents-toast documents-toast-success';
+            toast.setAttribute('role', 'status');
+            toast.textContent = 'Document sent to Super Admin.';
+            toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:1600;padding:0.75rem 1.25rem;background:#22c55e;color:#fff;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,0.15);';
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 4000);
+        }
+        // Show success when document was sent to department head(s)
+        if (document.body.getAttribute('data-sent-head') === '1') {
+            var count = parseInt(document.body.getAttribute('data-sent-head-count') || '1', 10);
+            var toast = document.createElement('div');
+            toast.className = 'documents-toast documents-toast-success';
+            toast.setAttribute('role', 'status');
+            toast.textContent = count === 1 ? 'Document sent to 1 department head.' : 'Document sent to ' + count + ' department heads.';
+            toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:1600;padding:0.75rem 1.25rem;background:#22c55e;color:#fff;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,0.15);';
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 4000);
+        }
+
+        // Send document modal: open, multi-select, select all / clear
+        var sendModal = document.getElementById('send-document-modal');
+        var sendDocumentIdInput = document.getElementById('send-document-id');
+        var sendHeadsList = document.getElementById('send-heads-list');
+        var sendSelectionCount = document.getElementById('send-selection-count');
+        var sendSubmitBtn = document.getElementById('send-submit-btn');
+        var sendSelectAllBtn = document.getElementById('send-select-all');
+        var sendClearAllBtn = document.getElementById('send-clear-all');
+
+        function updateSendSelection() {
+            if (!sendHeadsList) return;
+            var cbs = sendHeadsList.querySelectorAll('.send-head-cb');
+            var count = 0;
+            cbs.forEach(function(cb) {
+                if (cb.checked) count++;
+                var row = cb.closest('.send-head-row');
+                if (row) row.classList.toggle('selected', cb.checked);
+            });
+            if (sendSelectionCount) sendSelectionCount.textContent = count === 0 ? '0 selected' : count + ' selected';
+            if (sendSubmitBtn) {
+                sendSubmitBtn.disabled = count === 0;
+                sendSubmitBtn.textContent = count === 0 ? 'Send' : (count === 1 ? 'Send to 1 head' : 'Send to ' + count + ' heads');
+            }
+        }
+
+        document.querySelectorAll('[data-open-send-modal]').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var docId = this.getAttribute('data-document-id') || '';
+                if (sendDocumentIdInput) sendDocumentIdInput.value = docId;
+                if (sendHeadsList) sendHeadsList.querySelectorAll('.send-head-cb').forEach(function(cb) { cb.checked = false; });
+                updateSendSelection();
+                if (sendModal) {
+                    sendModal.hidden = false;
+                    document.body.classList.add('modal-open');
+                }
+            });
+        });
+
+        if (sendHeadsList) {
+            sendHeadsList.addEventListener('change', function(e) {
+                if (e.target.classList.contains('send-head-cb')) updateSendSelection();
+            });
+        }
+        if (sendSelectAllBtn && sendHeadsList) {
+            sendSelectAllBtn.addEventListener('click', function() {
+                sendHeadsList.querySelectorAll('.send-head-cb').forEach(function(cb) { cb.checked = true; });
+                updateSendSelection();
+            });
+        }
+        if (sendClearAllBtn && sendHeadsList) {
+            sendClearAllBtn.addEventListener('click', function() {
+                sendHeadsList.querySelectorAll('.send-head-cb').forEach(function(cb) { cb.checked = false; });
+                updateSendSelection();
+            });
+        }
+
+        function closeSendDocumentModal() {
+            if (sendModal) {
+                sendModal.hidden = true;
+                document.body.classList.remove('modal-open');
+                if (sendDocumentIdInput) sendDocumentIdInput.value = '';
+            }
+        }
+        document.querySelectorAll('[data-close-send-document]').forEach(function(btn) {
+            btn.addEventListener('click', closeSendDocumentModal);
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && sendModal && !sendModal.hidden) closeSendDocumentModal();
+        });
     })();
     </script>
 </body>

@@ -16,6 +16,205 @@ $userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
 $sidebar_active = 'documents';
 $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['user_username'] ?? $userName) ?: 'User';
 
+$config = require __DIR__ . '/../config.php';
+$documentsNamespace = $config['database'] . '.documents';
+$sentNamespace = $config['database'] . '.sent_to_super_admin';
+
+// Download document (file stored in documents collection)
+if (!empty($_GET['download']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['download'])) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($_GET['download'])]);
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        if (count($docs) > 0) {
+            $doc = (array)$docs[0];
+            $fileName = $doc['fileName'] ?? 'document.docx';
+            $fileContent = $doc['fileContent'] ?? '';
+            if ($fileContent !== '') {
+                header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+                header('Content-Disposition: attachment; filename="' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName) . '"');
+                echo base64_decode($fileContent, true) ?: $fileContent;
+                exit;
+            }
+        }
+    } catch (Exception $e) {}
+    header('HTTP/1.1 404 Not Found');
+    exit;
+}
+
+// Send document to Admin Side (record in sent_to_admin)
+if (!empty($_GET['send']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['send'])) {
+    $sendId = $_GET['send'];
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($sendId)]);
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        if (count($docs) > 0) {
+            $doc = (array)$docs[0];
+            $docCode = $doc['documentCode'] ?? $doc['document_code'] ?? '';
+            $docTitle = $doc['documentTitle'] ?? $doc['document_title'] ?? '';
+            $fileName = $doc['fileName'] ?? $doc['file_name'] ?? 'document.docx';
+            $sentToAdminNamespace = $config['database'] . '.sent_to_admin';
+            $bulk = new MongoDB\Driver\BulkWrite;
+            $bulk->insert([
+                'documentId'     => $sendId,
+                'documentCode'   => $docCode,
+                'documentTitle'  => $docTitle,
+                'fileName'       => $fileName,
+                'sentAt'         => new MongoDB\BSON\UTCDateTime(),
+                'sentByUserId'   => $_SESSION['user_id'] ?? '',
+                'sentByUserName'  => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+            ]);
+            $manager->executeBulkWrite($sentToAdminNamespace, $bulk);
+        }
+    } catch (Exception $e) {}
+    header('Location: documents.php?sent=1');
+    exit;
+}
+
+// Archive document and log to document history
+if (!empty($_GET['archive']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['archive'])) {
+    $archiveId = $_GET['archive'];
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($archiveId)]);
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        if (count($docs) > 0) {
+            $doc = (array)$docs[0];
+            $docCode = $doc['documentCode'] ?? $doc['document_code'] ?? '';
+            $docTitle = $doc['documentTitle'] ?? $doc['document_title'] ?? '';
+            $bulk = new MongoDB\Driver\BulkWrite;
+            $bulk->update(
+                ['_id' => new MongoDB\BSON\ObjectId($archiveId)],
+                ['$set' => ['status' => 'archived']],
+                ['multi' => false]
+            );
+            $manager->executeBulkWrite($documentsNamespace, $bulk);
+            $historyNamespace = $config['database'] . '.document_history';
+            $historyBulk = new MongoDB\Driver\BulkWrite;
+            $historyBulk->insert([
+                'documentId'    => $archiveId,
+                'documentCode'  => $docCode,
+                'documentTitle' => $docTitle,
+                'action'        => 'Archived',
+                'dateTime'      => new MongoDB\BSON\UTCDateTime(),
+                'userId'        => $_SESSION['user_id'] ?? '',
+                'userName'      => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+            ]);
+            $manager->executeBulkWrite($historyNamespace, $historyBulk);
+            // Remove from sent list so it disappears from Super Admin documents page
+            $deleteBulk = new MongoDB\Driver\BulkWrite;
+            $deleteBulk->delete(['documentId' => $archiveId], ['limit' => 0]);
+            $manager->executeBulkWrite($sentNamespace, $deleteBulk);
+        }
+    } catch (Exception $e) {}
+    header('Location: documents.php');
+    exit;
+}
+
+// Add document (POST) – save to database
+$addError = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'add_document') {
+    $documentCode = trim($_POST['document_code'] ?? '');
+    $documentTitle = trim($_POST['document_title'] ?? '');
+    if ($documentCode === '' || $documentTitle === '') {
+        $addError = 'Document code and title are required.';
+    } elseif (empty($_FILES['document_file']['tmp_name']) || !is_uploaded_file($_FILES['document_file']['tmp_name'])) {
+        $addError = 'Please select a DOCX file to upload.';
+    } else {
+        $file = $_FILES['document_file'];
+        $fname = $file['name'] ?? '';
+        if (!preg_match('/\.docx$/i', $fname)) {
+            $addError = 'Only .docx files are allowed.';
+        } else {
+            $fileContent = base64_encode(file_get_contents($file['tmp_name']));
+            if ($fileContent === false) {
+                $addError = 'Could not read the uploaded file.';
+            } else {
+                try {
+                    $manager = new MongoDB\Driver\Manager($config['uri']);
+                    $bulk = new MongoDB\Driver\BulkWrite;
+                    $bulk->insert([
+                        'documentCode'  => $documentCode,
+                        'documentTitle' => $documentTitle,
+                        'fileName'      => $fname,
+                        'fileContent'   => $fileContent,
+                        'createdAt'     => new MongoDB\BSON\UTCDateTime(),
+                        'createdBy'     => $_SESSION['user_id'] ?? '',
+                        'status'        => 'active',
+                    ]);
+                    $manager->executeBulkWrite($documentsNamespace, $bulk);
+                    header('Location: documents.php?added=1');
+                    exit;
+                } catch (Exception $e) {
+                    $addError = 'Failed to save document: ' . $e->getMessage();
+                }
+            }
+        }
+    }
+    if ($addError) {
+        $_SESSION['super_admin_doc_add_error'] = $addError;
+        header('Location: documents.php?add_error=1');
+        exit;
+    }
+}
+
+if (isset($_GET['add_error']) && isset($_SESSION['super_admin_doc_add_error'])) {
+    $addError = $_SESSION['super_admin_doc_add_error'];
+    unset($_SESSION['super_admin_doc_add_error']);
+}
+
+$sentList = [];
+$idsInList = [];
+try {
+    $manager = new MongoDB\Driver\Manager($config['uri']);
+    $query = new MongoDB\Driver\Query([], ['sort' => ['sentAt' => -1], 'limit' => 500]);
+    $cursor = $manager->executeQuery($sentNamespace, $query);
+    foreach ($cursor as $row) {
+        $arr = (array)$row;
+        $arr['documentId'] = (string)($arr['documentId'] ?? '');
+        $idsInList[$arr['documentId']] = true;
+        $dt = $arr['sentAt'] ?? null;
+        if ($dt instanceof MongoDB\BSON\UTCDateTime) {
+            $arr['sentAtFormatted'] = $dt->toDateTime()->setTimezone(new DateTimeZone(date_default_timezone_get() ?: 'UTC'))->format('M j, Y g:i A');
+        } else {
+            $arr['sentAtFormatted'] = '—';
+        }
+        $sentList[] = $arr;
+    }
+    // Add documents created by this Super Admin (saved via Add Document)
+    $currentUserId = $_SESSION['user_id'] ?? '';
+    if ($currentUserId !== '') {
+        $docQuery = new MongoDB\Driver\Query(
+            ['createdBy' => $currentUserId, 'status' => ['$ne' => 'archived']],
+            ['sort' => ['createdAt' => -1], 'limit' => 500]
+        );
+        $docCursor = $manager->executeQuery($documentsNamespace, $docQuery);
+        foreach ($docCursor as $doc) {
+            $d = (array)$doc;
+            $docId = (string)($d['_id'] ?? '');
+            if ($docId === '' || isset($idsInList[$docId])) continue;
+            $idsInList[$docId] = true;
+            $sentList[] = [
+                'documentId'       => $docId,
+                'documentCode'    => $d['documentCode'] ?? $d['document_code'] ?? '—',
+                'documentTitle'   => $d['documentTitle'] ?? $d['document_title'] ?? '—',
+                'fileName'        => $d['fileName'] ?? $d['file_name'] ?? 'document.docx',
+                'status'          => $d['status'] ?? 'active',
+                'sentAtFormatted' => '—',
+            ];
+        }
+    }
+} catch (Exception $e) {
+    $sentList = [];
+}
+
+$showSentToast = isset($_GET['sent']) && $_GET['sent'] === '1';
+$showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -46,9 +245,21 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
         .notif-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 180px; border-radius: 6px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 8px 0; }
         .notif-item { padding: 10px 12px; font-size: 0.95rem; color: #475569; }
         .main-content .admin-content-body { padding-top: 24px; }
+        .documents-actions-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .documents-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s; text-decoration: none; color: inherit; }
+        .documents-action-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .documents-action-open { background: #dbeafe; color: #1d4ed8; }
+        .documents-action-open:hover { background: #bfdbfe; color: #1d4ed8; }
+        .documents-action-archive { background: #fef3c7; color: #b45309; }
+        .documents-action-archive:hover { background: #fde68a; color: #b45309; }
+        .documents-action-send { background: #d1fae5; color: #047857; }
+        .documents-action-send:hover { background: #a7f3d0; color: #047857; }
+        .document-status { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+        .document-status-active { background: #d1fae5; color: #047857; }
+        .document-status-archived { background: #f3f4f6; color: #6b7280; }
     </style>
 </head>
-<body>
+<body<?php if (!empty($showSentToast)): ?> data-sent="1"<?php endif; ?><?php if (!empty($showAddedToast)): ?> data-added="1"<?php endif; ?><?php if (!empty($addError)): ?> data-add-error="1"<?php endif; ?>>
     <div class="dashboard-container">
         <?php include __DIR__ . '/_sidebar_super_admin.php'; ?>
 
@@ -102,12 +313,36 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
                                     <th>DOCUMENT CODE</th>
                                     <th>DOCUMENT TITLE</th>
                                     <th>DOCX FILE</th>
+                                    <th>STATUS</th>
+                                    <th>ACTION</th>
                                 </tr>
                             </thead>
                             <tbody id="documents-table-body">
+                                <?php if (empty($sentList)): ?>
                                 <tr>
-                                    <td colspan="4" class="offices-empty" id="no-documents-row">No documents yet.</td>
+                                    <td colspan="6" class="offices-empty" id="no-documents-row">No documents yet.</td>
                                 </tr>
+                                <?php else: ?>
+                                <?php foreach ($sentList as $idx => $sent):
+                                    $docId = $sent['documentId'];
+                                    $sentStatus = isset($sent['status']) ? ucfirst(strtolower($sent['status'])) : 'Active';
+                                ?>
+                                <tr data-document-row>
+                                    <td><?= (int)($idx + 1) ?></td>
+                                    <td><?= htmlspecialchars($sent['documentCode'] ?? '—') ?></td>
+                                    <td><?= htmlspecialchars($sent['documentTitle'] ?? '—') ?></td>
+                                    <td><a href="documents.php?download=<?= urlencode($docId) ?>" class="doc-file-link"><?= htmlspecialchars($sent['fileName'] ?? 'document.docx') ?></a></td>
+                                    <td><span class="document-status document-status-<?= strtolower(htmlspecialchars($sentStatus)) ?>"><?= htmlspecialchars($sentStatus) ?></span></td>
+                                    <td>
+                                        <div class="documents-actions-row">
+                                            <a href="documents.php?download=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-open" title="Download document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
+                                            <a href="documents.php?send=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-send" title="Send to Admin" onclick="return confirm('Send this document to Admin?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Admin</a>
+                                            <a href="documents.php?archive=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-archive" title="Archive document" onclick="return confirm('Archive this document?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -123,7 +358,8 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
                 <h2 id="add-document-title">Add Document</h2>
                 <button type="button" class="doc-modal-close" data-close-add-document aria-label="Close">&times;</button>
             </div>
-            <form id="add-document-form" class="doc-modal-form">
+            <form id="add-document-form" class="doc-modal-form" method="post" action="documents.php" enctype="multipart/form-data">
+                <input type="hidden" name="action" value="add_document">
                 <div class="doc-form-field">
                     <label for="document-code">Document Code</label>
                     <input type="text" id="document-code" name="document_code" placeholder="e.g. DOC-001" required>
@@ -136,7 +372,7 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
                     <label for="document-file">DOCX File</label>
                     <input type="file" id="document-file" name="document_file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" required>
                 </div>
-                <p class="doc-form-error" id="document-form-error" hidden></p>
+                <p class="doc-form-error" id="document-form-error" <?php if (empty($addError)): ?>hidden<?php endif; ?>><?php if (!empty($addError)): echo htmlspecialchars($addError); endif; ?></p>
                 <div class="doc-modal-actions">
                     <button type="button" class="doc-btn doc-btn-cancel" data-close-add-document>Cancel</button>
                     <button type="submit" class="doc-btn doc-btn-save">Save Document</button>
@@ -202,64 +438,27 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
             });
         }
 
-        if (addForm && documentsTableBody) {
-            addForm.addEventListener('submit', function(e) {
-                e.preventDefault();
+        if (document.body.getAttribute('data-sent') === '1') {
+            var toast = document.createElement('div');
+            toast.setAttribute('role', 'status');
+            toast.textContent = 'Document sent to Admin.';
+            toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:1600;padding:0.75rem 1.25rem;background:#22c55e;color:#fff;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,0.15);';
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 4000);
+        }
 
-                var codeInput = document.getElementById('document-code');
-                var titleInput = document.getElementById('document-title');
-                var fileInput = document.getElementById('document-file');
+        if (document.body.getAttribute('data-added') === '1') {
+            var toast = document.createElement('div');
+            toast.setAttribute('role', 'status');
+            toast.textContent = 'Document saved successfully.';
+            toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:1600;padding:0.75rem 1.25rem;background:#22c55e;color:#fff;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,0.15);';
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 4000);
+        }
 
-                var documentCode = (codeInput && codeInput.value || '').trim();
-                var documentTitle = (titleInput && titleInput.value || '').trim();
-                var selectedFile = fileInput && fileInput.files ? fileInput.files[0] : null;
-
-                if (!documentCode || !documentTitle || !selectedFile) {
-                    setFormError('Please complete all required fields.');
-                    return;
-                }
-
-                if (!selectedFile.name.toLowerCase().endsWith('.docx')) {
-                    setFormError('Only .docx files are allowed.');
-                    return;
-                }
-
-                var emptyRow = document.getElementById('no-documents-row');
-                if (emptyRow) emptyRow.remove();
-
-                var rowNumber = documentsTableBody.querySelectorAll('tr[data-document-row]').length + 1;
-
-                var row = document.createElement('tr');
-                row.setAttribute('data-document-row', 'true');
-
-                var numberCell = document.createElement('td');
-                numberCell.textContent = String(rowNumber);
-                row.appendChild(numberCell);
-
-                var codeCell = document.createElement('td');
-                codeCell.textContent = documentCode;
-                row.appendChild(codeCell);
-
-                var titleCell = document.createElement('td');
-                titleCell.textContent = documentTitle;
-                row.appendChild(titleCell);
-
-                var fileCell = document.createElement('td');
-                var fileLink = document.createElement('a');
-                fileLink.className = 'doc-file-link';
-                fileLink.textContent = selectedFile.name;
-                try {
-                    fileLink.href = URL.createObjectURL(selectedFile);
-                    fileLink.download = selectedFile.name;
-                } catch (err) {
-                    fileLink.href = '#';
-                }
-                fileCell.appendChild(fileLink);
-                row.appendChild(fileCell);
-
-                documentsTableBody.appendChild(row);
-                closeAddDocumentModal();
-            });
+        if (addModal && document.body.getAttribute('data-add-error') === '1') {
+            addModal.hidden = false;
+            document.body.classList.add('modal-open');
         }
     })();
     </script>
