@@ -29,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $msg = $_GET['msg'] ?? null;
 $msgOk = isset($_GET['ok']) && $_GET['ok'] === '1';
 $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'] : getUserSignature($_SESSION['user_id'] ?? '');
+$userPhotoForView = $_SESSION['user_photo'] ?? '';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -107,7 +108,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                     <h3>Profile Photo</h3>
                     <p class="card-desc">Your avatar shown in the sidebar and across the app</p>
                     <div class="profile-photo-row">
-                        <div class="profile-photo-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?= htmlspecialchars($_SESSION['user_photo']) ?>" alt=""><?php else: ?><?= htmlspecialchars($userInitial) ?><?php endif; ?></div>
+                        <div class="profile-photo-avatar profile-photo-view-trigger" role="button" tabindex="0" title="Click to view"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?= htmlspecialchars($_SESSION['user_photo']) ?>" alt=""><?php else: ?><?= htmlspecialchars($userInitial) ?><?php endif; ?></div>
                         <div>
                             <label class="profile-signature-btn" for="profile-photo-file-input"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Upload Photo</label>
                             <input type="file" id="profile-photo-file-input" accept="image/png,image/jpeg,image/jpg,image/gif" style="display:none;">

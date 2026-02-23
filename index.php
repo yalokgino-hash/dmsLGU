@@ -159,6 +159,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['login_type']) || $_
                     $_SESSION['user_name'] = $userArray['name'] ?? $email;
                     $_SESSION['user_username'] = $userArray['username'] ?? '';
                     $_SESSION['user_role'] = $userArray['role'] ?? 'user';
+                    $_SESSION['user_photo'] = $userArray['photo'] ?? '';
+                    $_SESSION['user_signature'] = $userArray['signature'] ?? '';
                     $role = $_SESSION['user_role'] ?? '';
                     if ($role === 'superadmin') {
                         header('Location: Super%20Admin%20Side/dashboard.php');

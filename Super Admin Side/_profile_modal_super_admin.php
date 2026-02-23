@@ -22,7 +22,7 @@ if ($profileUsername === '') $profileUsername = 'User';
                 <h3>Profile Information</h3>
                 <p class="profile-info-desc">Your account details and role in the system</p>
                 <div class="profile-info-grid">
-                    <div class="profile-info-avatar"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
+                    <div class="profile-info-avatar profile-photo-view-trigger" role="button" tabindex="0" title="Click to view"><?php if (!empty($_SESSION['user_photo'])): ?><img src="<?php echo htmlspecialchars($_SESSION['user_photo']); ?>" alt=""><?php else: ?><?php echo htmlspecialchars($userInitial); ?><?php endif; ?></div>
                     <span class="profile-info-label">Username</span>
                     <p class="profile-info-value"><?php echo htmlspecialchars($profileUsername); ?></p>
                     <span class="profile-info-label">Role</span>
@@ -56,3 +56,75 @@ if ($profileUsername === '') $profileUsername = 'User';
         </div>
     </div>
 </div>
+
+<!-- View Profile Photo Modal -->
+<div class="profile-photo-view-overlay" id="profile-photo-view-overlay" aria-hidden="true">
+    <div class="profile-photo-view-modal">
+        <button type="button" class="profile-photo-view-close" id="profile-photo-view-close" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>
+        <h3 class="profile-photo-view-title">Profile Photo</h3>
+        <div class="profile-photo-view-body">
+            <div class="profile-photo-view-img-wrap" id="profile-photo-view-img-wrap">
+                <img id="profile-photo-view-img" src="" alt="Profile photo" style="display:none;">
+            </div>
+            <p class="profile-photo-view-empty" id="profile-photo-view-empty" style="display:none;">No profile photo set</p>
+        </div>
+    </div>
+</div>
+<script>
+(function(){
+    function initProfilePhotoView() {
+        var overlay = document.getElementById('profile-photo-view-overlay');
+        var imgWrap = document.getElementById('profile-photo-view-img-wrap');
+        var img = document.getElementById('profile-photo-view-img');
+        var emptyMsg = document.getElementById('profile-photo-view-empty');
+        var closeBtn = document.getElementById('profile-photo-view-close');
+        if (!overlay) return;
+        function openViewModal(photoSrc) {
+            if (photoSrc && typeof photoSrc === 'string' && photoSrc.trim() !== '') {
+                if (img) { img.src = photoSrc; img.style.display = ''; }
+                if (imgWrap) imgWrap.style.display = '';
+                if (emptyMsg) emptyMsg.style.display = 'none';
+            } else {
+                if (img) { img.src = ''; img.style.display = 'none'; }
+                if (imgWrap) imgWrap.style.display = 'none';
+                if (emptyMsg) emptyMsg.style.display = 'block';
+            }
+            overlay.classList.add('profile-photo-view-open');
+            overlay.setAttribute('aria-hidden', 'false');
+        }
+        function closeViewModal() {
+            overlay.classList.remove('profile-photo-view-open');
+            overlay.setAttribute('aria-hidden', 'true');
+        }
+        document.addEventListener('click', function(e) {
+            var trigger = e.target.closest('.profile-photo-view-trigger');
+            if (trigger) {
+                e.preventDefault();
+                e.stopPropagation();
+                var imgEl = trigger.querySelector('img');
+                var photo = (imgEl && imgEl.src) ? imgEl.src : (trigger.getAttribute('data-photo') || '');
+                openViewModal(photo);
+            }
+        }, true);
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                if (overlay.classList.contains('profile-photo-view-open')) closeViewModal();
+                return;
+            }
+            if (e.key === 'Enter' && document.activeElement && document.activeElement.classList.contains('profile-photo-view-trigger')) {
+                e.preventDefault();
+                var imgEl = document.activeElement.querySelector('img');
+                var photo = (imgEl && imgEl.src) ? imgEl.src : (document.activeElement.getAttribute('data-photo') || '');
+                openViewModal(photo);
+            }
+        });
+        if (closeBtn) closeBtn.addEventListener('click', closeViewModal);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) closeViewModal(); });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initProfilePhotoView);
+    } else {
+        initProfilePhotoView();
+    }
+})();
+</script>
