@@ -198,15 +198,17 @@ $sentList = [];
 $idsInList = [];
 try {
     $manager = new MongoDB\Driver\Manager($config['uri']);
+    // Load every sent record (one row per send – no deduplication by documentId)
     $query = new MongoDB\Driver\Query([], ['sort' => ['sentAt' => -1], 'limit' => 500]);
     $cursor = $manager->executeQuery($sentNamespace, $query);
     foreach ($cursor as $row) {
         $arr = (array)$row;
         $arr['documentId'] = (string)($arr['documentId'] ?? '');
+        $arr['sentRecordId'] = isset($arr['_id']) ? (string)$arr['_id'] : uniqid('sent-', true);
         $idsInList[$arr['documentId']] = true;
         $dt = $arr['sentAt'] ?? null;
         if ($dt instanceof MongoDB\BSON\UTCDateTime) {
-            $arr['sentAtFormatted'] = $dt->toDateTime()->setTimezone(new DateTimeZone(date_default_timezone_get() ?: 'UTC'))->format('M j, Y g:i A');
+            $arr['sentAtFormatted'] = $dt->toDateTime()->setTimezone(new DateTimeZone('Asia/Manila'))->format('M j, Y g:i A');
         } else {
             $arr['sentAtFormatted'] = '—';
         }
@@ -227,6 +229,7 @@ try {
             $idsInList[$docId] = true;
             $sentList[] = [
                 'documentId'       => $docId,
+                'sentRecordId'     => $docId,
                 'documentCode'    => $d['documentCode'] ?? $d['document_code'] ?? '—',
                 'documentTitle'   => $d['documentTitle'] ?? $d['document_title'] ?? '—',
                 'fileName'        => $d['fileName'] ?? $d['file_name'] ?? 'document.docx',
@@ -294,6 +297,8 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
         .document-view-loading, .document-view-error { padding: 2rem; text-align: center; color: #64748b; }
         .document-view-error { color: #dc2626; }
         .doc-modal-footer { flex-shrink: 0; padding: 1rem 1.5rem; border-top: 1px solid #e2e8f0; gap: 10px; }
+        .doc-btn-download { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: #fff; background: #1d4ed8; border-radius: 8px; padding: 8px 16px; font-size: 14px; font-weight: 500; cursor: pointer; border: none; }
+        .doc-btn-download:hover { background: #1e40af; color: #fff; }
     </style>
 </head>
 <body<?php if (!empty($showSentToast)): ?> data-sent="1"<?php endif; ?><?php if (!empty($showAddedToast)): ?> data-added="1"<?php endif; ?><?php if (!empty($addError)): ?> data-add-error="1"<?php endif; ?>>
@@ -357,25 +362,28 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
                                     <th>DOCUMENT TITLE</th>
                                     <th>DOCX FILE</th>
                                     <th>STATUS</th>
+                                    <th>SENT AT</th>
                                     <th>ACTION</th>
                                 </tr>
                             </thead>
                             <tbody id="documents-table-body">
                                 <?php if (empty($sentList)): ?>
                                 <tr>
-                                    <td colspan="6" class="offices-empty" id="no-documents-row">No documents yet.</td>
+                                    <td colspan="7" class="offices-empty" id="no-documents-row">No documents yet.</td>
                                 </tr>
                                 <?php else: ?>
                                 <?php foreach ($sentList as $idx => $sent):
                                     $docId = $sent['documentId'];
+                                    $sentRecordId = $sent['sentRecordId'] ?? $docId;
                                     $sentStatus = isset($sent['status']) ? ucfirst(strtolower($sent['status'])) : 'Active';
                                 ?>
-                                <tr data-document-row id="doc-row-<?= htmlspecialchars($docId) ?>" data-document-id="<?= htmlspecialchars($docId) ?>">
+                                <tr data-document-row id="doc-row-<?= htmlspecialchars($sentRecordId) ?>" data-document-id="<?= htmlspecialchars($docId) ?>">
                                     <td><?= (int)($idx + 1) ?></td>
                                     <td><?= htmlspecialchars($sent['documentCode'] ?? '—') ?></td>
                                     <td><?= htmlspecialchars($sent['documentTitle'] ?? '—') ?></td>
                                     <td><a href="documents.php?view=<?= urlencode($docId) ?>" class="doc-file-link document-view-trigger" data-doc-id="<?= htmlspecialchars($docId) ?>" data-doc-name="<?= htmlspecialchars($sent['fileName'] ?? 'document.docx') ?>"><?= htmlspecialchars($sent['fileName'] ?? 'document.docx') ?></a></td>
                                     <td><span class="document-status document-status-<?= strtolower(htmlspecialchars($sentStatus)) ?>"><?= htmlspecialchars($sentStatus) ?></span></td>
+                                    <td><?= htmlspecialchars($sent['sentAtFormatted'] ?? '—') ?></td>
                                     <td>
                                         <div class="documents-actions-row">
                                             <a href="documents.php?view=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-open document-view-trigger" data-doc-id="<?= htmlspecialchars($docId) ?>" data-doc-name="<?= htmlspecialchars($sent['fileName'] ?? 'document.docx') ?>" title="View document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>View</a>
@@ -437,7 +445,7 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
                 <div id="document-view-error" class="document-view-error" style="display:none;">Could not load document.</div>
             </div>
             <div class="doc-modal-footer doc-modal-actions">
-                <a id="document-view-download-link" href="#" class="doc-btn doc-btn-cancel" style="display:none;">Download</a>
+                <a id="document-view-download-link" href="#" class="doc-btn doc-btn-download" style="display:none;" target="_blank" rel="noopener" download>Download</a>
                 <button type="button" class="doc-btn doc-btn-save" data-close-document-view>Close</button>
             </div>
         </div>
@@ -530,7 +538,11 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
             return m ? decodeURIComponent(m[1]) : null;
         })();
         if (highlightId) {
-            var row = document.getElementById('doc-row-' + highlightId);
+            var rows = document.querySelectorAll('tr[data-document-id]');
+            var row = null;
+            for (var i = 0; i < rows.length; i++) {
+                if (rows[i].getAttribute('data-document-id') === highlightId) { row = rows[i]; break; }
+            }
             if (row) {
                 row.classList.add('doc-row-highlight');
                 row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -554,8 +566,10 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
             documentViewContainer.style.display = 'none';
             documentViewContainer.innerHTML = '';
             documentViewError.style.display = 'none';
-            documentViewDownloadLink.style.display = 'none';
-            documentViewDownloadLink.href = 'documents.php?download=' + encodeURIComponent(docId);
+            if (documentViewDownloadLink) {
+                documentViewDownloadLink.style.display = 'none';
+                documentViewDownloadLink.href = 'documents.php?download=' + encodeURIComponent(docId);
+            }
 
             fetch('documents.php?view=' + encodeURIComponent(docId))
                 .then(function(res) {
@@ -567,7 +581,7 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
                     if (typeof docx !== 'undefined' && docx.renderAsync) {
                         return docx.renderAsync(blob, documentViewContainer).then(function() {
                             documentViewContainer.style.display = 'block';
-                            documentViewDownloadLink.style.display = 'inline-block';
+                            if (documentViewDownloadLink) documentViewDownloadLink.style.display = 'inline-flex';
                         });
                     }
                     documentViewError.textContent = 'Document viewer not available.';
