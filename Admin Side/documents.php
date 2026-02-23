@@ -419,6 +419,8 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
     .documents-action-archive:hover { background: #fde68a; color: #b45309; }
     .documents-action-send { background: #d1fae5; color: #047857; }
     .documents-action-send:hover { background: #a7f3d0; color: #047857; }
+    .documents-action-send-super { background: #dbeafe; color: #1d4ed8; text-decoration: none; }
+    .documents-action-send-super:hover { background: #bfdbfe; color: #1d4ed8; }
     #send-document-modal .doc-modal-dialog { max-width: 440px; }
     .send-modal-subtitle { margin: 0 0 1rem 0; font-size: 0.9rem; color: #64748b; line-height: 1.45; }
     .send-heads-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
@@ -556,7 +558,8 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                                     <td>
                                         <div class="documents-actions-row">
                                             <a href="documents.php?download=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-open" title="Download document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
-                                            <button type="button" class="documents-action-btn documents-action-send" data-document-id="<?php echo htmlspecialchars($docId); ?>" data-open-send-modal title="Send document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send</button>
+                                            <a href="documents.php?send=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-send-super" title="Send to Super Admin" onclick="return confirm('Send this document to Super Admin?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Super Admin</a>
+                                            <button type="button" class="documents-action-btn documents-action-send" data-document-id="<?php echo htmlspecialchars($docId); ?>" data-open-send-modal title="Send to department heads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Heads</button>
                                             <a href="documents.php?archive=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-archive" title="Archive document" onclick="return confirm('Archive this document?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</a>
                                         </div>
                                     </td>
