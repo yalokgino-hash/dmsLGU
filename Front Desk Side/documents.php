@@ -16,6 +16,58 @@ if ($userRole === 'superadmin') {
 }
 
 $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
+
+$config = require __DIR__ . '/../config.php';
+$documentsNamespace = $config['database'] . '.documents';
+
+// Send document to Super Admin (record in sent_to_super_admin)
+if (!empty($_GET['send']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['send'])) {
+    $sendId = $_GET['send'];
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($sendId)]);
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        if (count($docs) > 0) {
+            $doc = (array)$docs[0];
+            $docCode = $doc['documentCode'] ?? $doc['document_code'] ?? '';
+            $docTitle = $doc['documentTitle'] ?? $doc['document_title'] ?? '';
+            $fileName = $doc['fileName'] ?? $doc['file_name'] ?? 'document.docx';
+            $sentNamespace = $config['database'] . '.sent_to_super_admin';
+            $bulk = new MongoDB\Driver\BulkWrite;
+            $bulk->insert([
+                'documentId'     => $sendId,
+                'documentCode'   => $docCode,
+                'documentTitle'  => $docTitle,
+                'fileName'       => $fileName,
+                'sentAt'         => new MongoDB\BSON\UTCDateTime(),
+                'sentByUserId'   => $_SESSION['user_id'] ?? '',
+                'sentByUserName' => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+            ]);
+            $manager->executeBulkWrite($sentNamespace, $bulk);
+        }
+    } catch (Exception $e) {}
+    header('Location: documents.php?sent=1');
+    exit;
+}
+
+// Fetch documents from database (active only; exclude archived)
+$documentsList = [];
+try {
+    $manager = new MongoDB\Driver\Manager($config['uri']);
+    $filter = ['status' => ['$ne' => 'archived']];
+    $query = new MongoDB\Driver\Query($filter, ['sort' => ['createdAt' => -1], 'limit' => 500]);
+    $cursor = $manager->executeQuery($documentsNamespace, $query);
+    foreach ($cursor as $doc) {
+        $arr = (array)$doc;
+        $arr['_id'] = (string)($arr['_id'] ?? '');
+        $documentsList[] = $arr;
+    }
+} catch (Exception $e) {
+    $documentsList = [];
+}
+
+$showSentToast = isset($_GET['sent']) && $_GET['sent'] === '1';
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -217,9 +269,18 @@ $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
             color: #94a3b8;
             margin: 0;
         }
+
+        .documents-actions-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .documents-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s; text-decoration: none; color: inherit; }
+        .documents-action-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .documents-action-send-super { background: #dbeafe; color: #1d4ed8; }
+        .documents-action-send-super:hover { background: #bfdbfe; color: #1d4ed8; }
+        .document-status { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+        .document-status-active { background: #d1fae5; color: #047857; }
+        .document-status-archived { background: #f3f4f6; color: #6b7280; }
     </style>
 </head>
-<body class="admin-dashboard documents-page">
+<body class="admin-dashboard documents-page"<?php if ($showSentToast): ?> data-sent="1"<?php endif; ?>>
     <div class="admin-body">
         <aside class="admin-sidebar staff-sidebar">
             <div class="sidebar-header staff-sidebar-header">
@@ -305,7 +366,7 @@ $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
                     <div class="documents-list-header">
                         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><polyline points="16 13 12 13 12 17"/><line x1="16 17" y1="17" x2="8" y2="17"/></svg>
                         <h3>Document List</h3>
-                        <span class="documents-list-count">0</span>
+                        <span class="documents-list-count"><?php echo count($documentsList); ?></span>
                     </div>
                     <div class="documents-table-wrap">
                         <table class="documents-table">
@@ -313,15 +374,15 @@ $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
                                 <tr>
                                     <th>Control No.</th>
                                     <th>Title</th>
-                                    <th>Sender</th>
+                                    <th>File</th>
                                     <th>Status</th>
-                                    <th>Date</th>
                                     <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody>
+                                <?php if (empty($documentsList)): ?>
                                 <tr>
-                                    <td colspan="6">
+                                    <td colspan="5">
                                         <div class="documents-empty-state">
                                             <svg viewBox="0 0 24 24" width="64" height="64" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
                                             <h4>No documents found</h4>
@@ -329,6 +390,28 @@ $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
                                         </div>
                                     </td>
                                 </tr>
+                                <?php else: ?>
+                                <?php foreach ($documentsList as $idx => $doc): ?>
+                                <?php
+                                    $docId = $doc['_id'] ?? '';
+                                    $docCode = $doc['documentCode'] ?? $doc['document_code'] ?? '—';
+                                    $docTitle = $doc['documentTitle'] ?? $doc['document_title'] ?? '—';
+                                    $fileName = $doc['fileName'] ?? $doc['file_name'] ?? 'document.docx';
+                                    $docStatus = $doc['status'] ?? 'active';
+                                ?>
+                                <tr>
+                                    <td><?php echo htmlspecialchars($docCode); ?></td>
+                                    <td><?php echo htmlspecialchars($docTitle); ?></td>
+                                    <td><?php echo htmlspecialchars($fileName); ?></td>
+                                    <td><span class="document-status document-status-<?php echo strtolower(htmlspecialchars($docStatus)); ?>"><?php echo htmlspecialchars(ucfirst($docStatus)); ?></span></td>
+                                    <td>
+                                        <div class="documents-actions-row">
+                                            <a href="documents.php?send=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-send-super" title="Send to Super Admin" onclick="return confirm('Send this document to Super Admin?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Super Admin</a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
@@ -353,6 +436,15 @@ $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
                 btn.setAttribute('aria-expanded', 'false');
             });
             dropdown.addEventListener('click', function(e) { e.stopPropagation(); });
+        }
+
+        if (document.body.getAttribute('data-sent') === '1') {
+            var toast = document.createElement('div');
+            toast.setAttribute('role', 'status');
+            toast.textContent = 'Document sent to Super Admin.';
+            toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:1600;padding:0.75rem 1.25rem;background:#22c55e;color:#fff;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,0.15);';
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 4000);
         }
     })();
     </script>
