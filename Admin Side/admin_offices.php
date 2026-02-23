@@ -32,7 +32,7 @@ function getOffices($config) {
     $namespace = $namespace ?? ($config['database'] . '.' . ($config['collection'] ?? 'offices'));
     try {
         $manager = new MongoDB\Driver\Manager($config['uri']);
-        $query = new MongoDB\Driver\Query([], ['sort' => ['office_name' => 1]]);
+        $query = new MongoDB\Driver\Query([], ['sort' => ['created_at' => 1]]);
         $cursor = $manager->executeQuery($namespace, $query);
         $docs = $cursor->toArray();
         $offices = [];
@@ -475,6 +475,10 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                        <button type="button" class="dept-add-btn" id="open-add-office-modal">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                            Add Department
+                        </button>
                         <div class="header-controls">
                             <button class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
                                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
@@ -546,12 +550,6 @@ $filterQuery = $search !== '' ? 'search=' . rawurlencode($search) : '';
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
                         Filter
                     </button>
-                    <div class="dept-search-row-actions">
-                        <button type="button" class="dept-add-btn" id="open-add-office-modal">
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-                            Add Department
-                        </button>
-                    </div>
                 </form>
 
                 <div class="dept-cards-grid" id="dept-cards-grid">
