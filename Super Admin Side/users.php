@@ -21,8 +21,8 @@ if (!isset($config)) {
 }
 
 /**
- * Fetch all users from the database (same collection as User Management).
- * @return array List of user records with _id (string), username, name, email, role, etc.
+ * Get users list.
+ * @return array
  */
 function getUsersList($config, $search = '') {
     $namespace = $config['database'] . '.users';
