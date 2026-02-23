@@ -19,6 +19,33 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
 $config = require __DIR__ . '/../config.php';
 $documentsNamespace = $config['database'] . '.documents';
 $sentNamespace = $config['database'] . '.sent_to_super_admin';
+require_once __DIR__ . '/_notifications_super_admin.php';
+$notifData = getSuperAdminNotifications($config);
+$notifCount = $notifData['count'];
+$notifItems = $notifData['items'];
+
+// View document (return docx for in-browser viewer – no download)
+if (!empty($_GET['view']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['view'])) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($_GET['view'])]);
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        if (count($docs) > 0) {
+            $doc = (array)$docs[0];
+            $fileName = $doc['fileName'] ?? 'document.docx';
+            $fileContent = $doc['fileContent'] ?? '';
+            if ($fileContent !== '') {
+                header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+                header('Content-Disposition: inline; filename="' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName) . '"');
+                echo base64_decode($fileContent, true) ?: $fileContent;
+                exit;
+            }
+        }
+    } catch (Exception $e) {}
+    header('HTTP/1.1 404 Not Found');
+    exit;
+}
 
 // Download document (file stored in documents collection)
 if (!empty($_GET['download']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['download'])) {
@@ -238,12 +265,15 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
         .header-controls { position: relative; }
         .icon-btn, .avatar-btn { background: #f1f5f9; border: none; color: #475569; padding: 0; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
         .icon-btn:hover, .avatar-btn:hover { background: #e2e8f0; color: #1e293b; }
-        .icon-btn { position: relative; width: 40px; height: 40px; }
-        .icon-btn svg, .avatar-btn svg { width: 22px; height: 22px; }
-        .notif-badge { position: absolute; top: 8px; right: 8px; background: #ef4444; color: white; font-size: 12px; padding: 4px 8px; border-radius: 999px; line-height: 1; }
-        .avatar-btn { width: 40px; height: 40px; padding: 0; border-radius: 10px; }
-        .notif-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 180px; border-radius: 6px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 8px 0; }
-        .notif-item { padding: 10px 12px; font-size: 0.95rem; color: #475569; }
+        .icon-btn { position: relative; width: 48px; height: 48px; }
+        .icon-btn svg, .avatar-btn svg { width: 26px; height: 26px; }
+        .notif-badge { position: absolute; top: 6px; right: 6px; background: #ef4444; color: white; font-size: 13px; padding: 4px 8px; border-radius: 999px; line-height: 1; }
+        .avatar-btn { width: 48px; height: 48px; padding: 0; border-radius: 10px; }
+        .notif-dropdown { position: absolute; right: 0; top: 54px; background: white; color: #0b1720; min-width: 240px; border-radius: 8px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 10px 0; }
+        .notif-item { padding: 12px 14px; font-size: 1.05rem; color: #475569; }
+        .notif-item-link { display: block; text-decoration: none; color: #1e293b; border-bottom: 1px solid #f1f5f9; }
+        .notif-item-link:hover { background: #f8fafc; color: #0f172a; }
+        .notif-item-link:last-child { border-bottom: none; }
         .main-content .admin-content-body { padding-top: 24px; }
         .documents-actions-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
         .documents-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s; text-decoration: none; color: inherit; }
@@ -257,6 +287,13 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
         .document-status { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
         .document-status-active { background: #d1fae5; color: #047857; }
         .document-status-archived { background: #f3f4f6; color: #6b7280; }
+        tr.doc-row-highlight { background: #dbeafe !important; box-shadow: inset 0 0 0 2px #3b82f6; }
+        .doc-modal-dialog-view { max-width: 90%; width: 900px; max-height: 90vh; display: flex; flex-direction: column; }
+        .document-view-body { flex: 1; min-height: 0; overflow: auto; padding: 1rem; background: #f8fafc; border-top: 1px solid #e2e8f0; }
+        .document-view-container { overflow: auto; max-height: 65vh; padding: 1rem; background: #fff; border-radius: 8px; }
+        .document-view-loading, .document-view-error { padding: 2rem; text-align: center; color: #64748b; }
+        .document-view-error { color: #dc2626; }
+        .doc-modal-footer { flex-shrink: 0; padding: 1rem 1.5rem; border-top: 1px solid #e2e8f0; gap: 10px; }
     </style>
 </head>
 <body<?php if (!empty($showSentToast)): ?> data-sent="1"<?php endif; ?><?php if (!empty($showAddedToast)): ?> data-added="1"<?php endif; ?><?php if (!empty($addError)): ?> data-add-error="1"<?php endif; ?>>
@@ -273,11 +310,17 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <div class="header-controls">
                             <button class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
-                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                                <span class="notif-badge" id="notif-count" aria-hidden="true">3</span>
+                                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                                <span class="notif-badge" id="notif-count" aria-hidden="true" style="<?= $notifCount === 0 ? 'display:none' : '' ?>"><?= (int)$notifCount ?></span>
                             </button>
                             <div class="notif-dropdown" id="notif-dropdown" aria-hidden="true">
+                                <?php if (count($notifItems) === 0): ?>
                                 <div class="notif-item">No new notifications</div>
+                                <?php else: ?>
+                                <?php foreach ($notifItems as $ni): ?>
+                                <a href="documents.php?highlight=<?= urlencode($ni['documentId']) ?>" class="notif-item notif-item-link"><?= htmlspecialchars($ni['documentTitle']) ?> — from <?= htmlspecialchars($ni['sentByUserName']) ?> (<?= htmlspecialchars($ni['sentAtFormatted']) ?>)</a>
+                                <?php endforeach; ?>
+                                <?php endif; ?>
                             </div>
                         </div>
                         <div class="header-controls">
@@ -327,15 +370,15 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
                                     $docId = $sent['documentId'];
                                     $sentStatus = isset($sent['status']) ? ucfirst(strtolower($sent['status'])) : 'Active';
                                 ?>
-                                <tr data-document-row>
+                                <tr data-document-row id="doc-row-<?= htmlspecialchars($docId) ?>" data-document-id="<?= htmlspecialchars($docId) ?>">
                                     <td><?= (int)($idx + 1) ?></td>
                                     <td><?= htmlspecialchars($sent['documentCode'] ?? '—') ?></td>
                                     <td><?= htmlspecialchars($sent['documentTitle'] ?? '—') ?></td>
-                                    <td><a href="documents.php?download=<?= urlencode($docId) ?>" class="doc-file-link"><?= htmlspecialchars($sent['fileName'] ?? 'document.docx') ?></a></td>
+                                    <td><a href="documents.php?view=<?= urlencode($docId) ?>" class="doc-file-link document-view-trigger" data-doc-id="<?= htmlspecialchars($docId) ?>" data-doc-name="<?= htmlspecialchars($sent['fileName'] ?? 'document.docx') ?>"><?= htmlspecialchars($sent['fileName'] ?? 'document.docx') ?></a></td>
                                     <td><span class="document-status document-status-<?= strtolower(htmlspecialchars($sentStatus)) ?>"><?= htmlspecialchars($sentStatus) ?></span></td>
                                     <td>
                                         <div class="documents-actions-row">
-                                            <a href="documents.php?download=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-open" title="Download document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
+                                            <a href="documents.php?view=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-open document-view-trigger" data-doc-id="<?= htmlspecialchars($docId) ?>" data-doc-name="<?= htmlspecialchars($sent['fileName'] ?? 'document.docx') ?>" title="View document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>View</a>
                                             <a href="documents.php?send=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-send" title="Send to Admin" onclick="return confirm('Send this document to Admin?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Admin</a>
                                             <a href="documents.php?archive=<?= urlencode($docId) ?>" class="documents-action-btn documents-action-archive" title="Archive document" onclick="return confirm('Archive this document?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</a>
                                         </div>
@@ -381,8 +424,29 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
         </div>
     </div>
 
+    <div class="doc-modal" id="document-view-modal" hidden>
+        <button type="button" class="doc-modal-overlay" data-close-document-view aria-label="Close"></button>
+        <div class="doc-modal-dialog doc-modal-dialog-view" role="dialog" aria-modal="true" aria-labelledby="document-view-title">
+            <div class="doc-modal-header">
+                <h2 id="document-view-title" class="document-view-title">Document</h2>
+                <button type="button" class="doc-modal-close" data-close-document-view aria-label="Close">&times;</button>
+            </div>
+            <div class="document-view-body">
+                <div id="document-view-loading" class="document-view-loading">Loading document…</div>
+                <div id="document-view-container" class="document-view-container" style="display:none;"></div>
+                <div id="document-view-error" class="document-view-error" style="display:none;">Could not load document.</div>
+            </div>
+            <div class="doc-modal-footer doc-modal-actions">
+                <a id="document-view-download-link" href="#" class="doc-btn doc-btn-cancel" style="display:none;">Download</a>
+                <button type="button" class="doc-btn doc-btn-save" data-close-document-view>Close</button>
+            </div>
+        </div>
+    </div>
+
     <?php include __DIR__ . '/_profile_modal_super_admin.php'; ?>
 
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.0/dist/docx-preview.min.js"></script>
     <script>
     (function() {
         var openAddModalBtn = document.getElementById('open-add-document-modal');
@@ -460,6 +524,92 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
             addModal.hidden = false;
             document.body.classList.add('modal-open');
         }
+
+        var highlightId = (function() {
+            var m = /[?&]highlight=([^&]+)/.exec(window.location.search);
+            return m ? decodeURIComponent(m[1]) : null;
+        })();
+        if (highlightId) {
+            var row = document.getElementById('doc-row-' + highlightId);
+            if (row) {
+                row.classList.add('doc-row-highlight');
+                row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                setTimeout(function() { row.classList.remove('doc-row-highlight'); }, 4000);
+            }
+        }
+
+        var documentViewModal = document.getElementById('document-view-modal');
+        var documentViewTitle = document.getElementById('document-view-title');
+        var documentViewContainer = document.getElementById('document-view-container');
+        var documentViewLoading = document.getElementById('document-view-loading');
+        var documentViewError = document.getElementById('document-view-error');
+        var documentViewDownloadLink = document.getElementById('document-view-download-link');
+
+        function openDocumentViewModal(docId, docName) {
+            if (!documentViewModal || !documentViewContainer) return;
+            documentViewModal.hidden = false;
+            document.body.classList.add('modal-open');
+            documentViewTitle.textContent = docName || 'Document';
+            documentViewLoading.style.display = 'block';
+            documentViewContainer.style.display = 'none';
+            documentViewContainer.innerHTML = '';
+            documentViewError.style.display = 'none';
+            documentViewDownloadLink.style.display = 'none';
+            documentViewDownloadLink.href = 'documents.php?download=' + encodeURIComponent(docId);
+
+            fetch('documents.php?view=' + encodeURIComponent(docId))
+                .then(function(res) {
+                    if (!res.ok) throw new Error('Load failed');
+                    return res.blob();
+                })
+                .then(function(blob) {
+                    documentViewLoading.style.display = 'none';
+                    if (typeof docx !== 'undefined' && docx.renderAsync) {
+                        return docx.renderAsync(blob, documentViewContainer).then(function() {
+                            documentViewContainer.style.display = 'block';
+                            documentViewDownloadLink.style.display = 'inline-block';
+                        });
+                    }
+                    documentViewError.textContent = 'Document viewer not available.';
+                    documentViewError.style.display = 'block';
+                })
+                .catch(function() {
+                    documentViewLoading.style.display = 'none';
+                    documentViewError.style.display = 'block';
+                });
+        }
+
+        function closeDocumentViewModal() {
+            if (!documentViewModal) return;
+            documentViewModal.hidden = true;
+            document.body.classList.remove('modal-open');
+            if (documentViewContainer) {
+                documentViewContainer.innerHTML = '';
+                documentViewContainer.style.display = 'none';
+            }
+            if (documentViewLoading) documentViewLoading.style.display = 'block';
+            if (documentViewError) documentViewError.style.display = 'none';
+            if (documentViewDownloadLink) documentViewDownloadLink.style.display = 'none';
+        }
+
+        document.querySelectorAll('.document-view-trigger').forEach(function(el) {
+            el.addEventListener('click', function(e) {
+                e.preventDefault();
+                var docId = el.getAttribute('data-doc-id');
+                var docName = el.getAttribute('data-doc-name') || 'document.docx';
+                if (docId) openDocumentViewModal(docId, docName);
+            });
+        });
+
+        document.querySelectorAll('[data-close-document-view]').forEach(function(btn) {
+            btn.addEventListener('click', closeDocumentViewModal);
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && documentViewModal && !documentViewModal.hidden) {
+                closeDocumentViewModal();
+            }
+        });
     })();
     </script>
     <script>
@@ -472,5 +622,6 @@ $showAddedToast = isset($_GET['added']) && $_GET['added'] === '1';
     })();
     </script>
     <script src="sidebar_super_admin.js"></script>
+    <script src="super_admin_notifications.js"></script>
 </body>
 </html>

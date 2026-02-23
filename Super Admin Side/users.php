@@ -19,6 +19,10 @@ $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['us
 if (!isset($config)) {
     $config = require dirname(__DIR__) . '/config.php';
 }
+require_once __DIR__ . '/_notifications_super_admin.php';
+$notifData = getSuperAdminNotifications($config);
+$notifCount = $notifData['count'];
+$notifItems = $notifData['items'];
 
 /**
  * Get users list.
@@ -156,12 +160,15 @@ if ($roleFilter !== '') {
         .header-controls { position: relative; }
         .icon-btn, .avatar-btn { background: #f1f5f9; border: none; color: #475569; padding: 0; border-radius: 10px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
         .icon-btn:hover, .avatar-btn:hover { background: #e2e8f0; color: #1e293b; }
-        .icon-btn { position: relative; width: 40px; height: 40px; }
-        .icon-btn svg, .avatar-btn svg { width: 22px; height: 22px; }
-        .notif-badge { position: absolute; top: 8px; right: 8px; background: #ef4444; color: white; font-size: 12px; padding: 4px 8px; border-radius: 999px; line-height: 1; }
-        .avatar-btn { width: 40px; height: 40px; padding: 0; border-radius: 10px; }
-        .notif-dropdown { position: absolute; right: 0; top: 48px; background: white; color: #0b1720; min-width: 180px; border-radius: 6px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 8px 0; }
-        .notif-item { padding: 10px 12px; font-size: 0.95rem; color: #475569; }
+        .icon-btn { position: relative; width: 48px; height: 48px; }
+        .icon-btn svg, .avatar-btn svg { width: 26px; height: 26px; }
+        .notif-badge { position: absolute; top: 6px; right: 6px; background: #ef4444; color: white; font-size: 13px; padding: 4px 8px; border-radius: 999px; line-height: 1; }
+        .avatar-btn { width: 48px; height: 48px; padding: 0; border-radius: 10px; }
+        .notif-dropdown { position: absolute; right: 0; top: 54px; background: white; color: #0b1720; min-width: 240px; border-radius: 8px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 10px 0; }
+        .notif-item { padding: 12px 14px; font-size: 1.05rem; color: #475569; }
+        .notif-item-link { display: block; text-decoration: none; color: #1e293b; border-bottom: 1px solid #f1f5f9; }
+        .notif-item-link:hover { background: #f8fafc; color: #0f172a; }
+        .notif-item-link:last-child { border-bottom: none; }
         .main-content .admin-content-body { padding-top: 24px; }
         .offices-card .offices-tools.doc-filter-row select { height: 42px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 12px; font-size: 14px; color: #1e293b; background: #fff; font-family: 'Poppins', sans-serif; }
         .users-toast { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 1500; display: flex; align-items: center; gap: 12px; padding: 0.875rem 1rem; border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.15); max-width: 360px; animation: users-toast-in 0.3s ease; }
@@ -184,11 +191,17 @@ if ($roleFilter !== '') {
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <div class="header-controls">
                             <button class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
-                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                                <span class="notif-badge" id="notif-count" aria-hidden="true">3</span>
+                                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                                <span class="notif-badge" id="notif-count" aria-hidden="true" style="<?= $notifCount === 0 ? 'display:none' : '' ?>"><?= (int)$notifCount ?></span>
                             </button>
                             <div class="notif-dropdown" id="notif-dropdown" aria-hidden="true">
+                                <?php if (count($notifItems) === 0): ?>
                                 <div class="notif-item">No new notifications</div>
+                                <?php else: ?>
+                                <?php foreach ($notifItems as $ni): ?>
+                                <a href="documents.php?highlight=<?= urlencode($ni['documentId']) ?>" class="notif-item notif-item-link"><?= htmlspecialchars($ni['documentTitle']) ?> — from <?= htmlspecialchars($ni['sentByUserName']) ?> (<?= htmlspecialchars($ni['sentAtFormatted']) ?>)</a>
+                                <?php endforeach; ?>
+                                <?php endif; ?>
                             </div>
                         </div>
                         <div class="header-controls">
@@ -363,5 +376,6 @@ if ($roleFilter !== '') {
     })();
     </script>
     <script src="sidebar_super_admin.js"></script>
+    <script src="super_admin_notifications.js"></script>
 </body>
 </html>
