@@ -48,8 +48,54 @@ if (!class_exists('MongoDB\Driver\Manager')) {
 }
 
 $config = require __DIR__ . '/config.php';
+require_once __DIR__ . '/Super Admin Side/_activity_logger.php';
+require_once __DIR__ . '/Auth/_auth_rate_limiter.php';
 $error = '';
 $success = '';
+
+function getAccountRestrictionMessage($user) {
+    $state = strtolower(trim((string)($user['account_state'] ?? 'active')));
+    if ($state === '' || $state === 'active') {
+        return '';
+    }
+
+    if ($state === 'disabled') {
+        $reason = trim((string)($user['disabled_reason'] ?? ''));
+        $msg = 'This account is disabled.';
+        if ($reason !== '') {
+            $msg .= ' Reason: ' . $reason;
+        }
+        return $msg;
+    }
+
+    if ($state === 'suspended') {
+        $until = $user['suspended_until'] ?? null;
+        $untilTs = null;
+        if ($until instanceof MongoDB\BSON\UTCDateTime) {
+            $untilTs = $until->toDateTime()->getTimestamp();
+        } elseif (is_numeric($until)) {
+            $untilTs = (int)$until;
+        }
+        if ($untilTs !== null && $untilTs <= time()) {
+            return '';
+        }
+
+        $days = 1;
+        if ($untilTs !== null) {
+            $remaining = max(1, $untilTs - time());
+            $days = (int)ceil($remaining / 86400);
+        }
+        $reason = trim((string)($user['suspend_reason'] ?? ''));
+        $msg = 'This account is suspended for ' . $days . ' day(s).';
+        if ($reason !== '') {
+            $msg .= ' Reason: ' . $reason;
+        }
+        return $msg;
+    }
+
+    return '';
+}
+
 if (isset($_GET['error'])) {
     $errMap = [
         'google_not_configured'   => 'Sign in with Google is not configured. Add Google Client ID and Secret in config.',
@@ -60,16 +106,36 @@ if (isset($_GET['error'])) {
         'google_otp_send_failed' => 'Google sign-in was verified, but we could not send your OTP email. Please check mail settings and try again.',
         'google_create_failed'   => 'Could not create your account. Please try again.',
         'google_login_failed'    => 'Login failed. Please try again.',
+        'google_account_disabled' => 'Your account is disabled.',
+        'google_account_suspended' => 'Your account is suspended.',
     ];
     $error = $errMap[$_GET['error']] ?? 'An error occurred. Please try again.';
+    if ($_GET['error'] === 'google_account_disabled' && isset($_GET['reason'])) {
+        $reason = trim((string)$_GET['reason']);
+        if ($reason !== '') {
+            $error .= ' Reason: ' . $reason;
+        }
+    } elseif ($_GET['error'] === 'google_account_suspended') {
+        $days = max(1, (int)($_GET['days'] ?? 1));
+        $error = 'Your account is suspended for ' . $days . ' day(s).';
+        $reason = trim((string)($_GET['reason'] ?? ''));
+        if ($reason !== '') {
+            $error .= ' Reason: ' . $reason;
+        }
+    }
 }
 $emailError = false;
 $passwordError = false;
 $adminError = '';
 $adminUsernameError = false;
 $adminPasswordError = false;
+$staffRateLimitSeconds = 0;
+$staffRateLimitType = '';
+$adminRateLimitSeconds = 0;
+$adminRateLimitType = '';
 
 if (isset($_GET['logout'])) {
+    activityLog($config, 'logout', ['module' => 'auth', 'source' => 'index.php'], 'success');
     session_destroy();
     header('Location: ' . str_replace('?logout=1', '', $_SERVER['REQUEST_URI']));
     exit;
@@ -78,11 +144,21 @@ if (isset($_GET['logout'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_type']) && $_POST['login_type'] === 'admin') {
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
+    $clientIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+    $adminRateScope = 'manual_admin_login';
+    $adminRateId = strtolower($username);
     if ($username === '' || $password === '') {
         $adminError = 'Username and password are required.';
         if ($username === '') $adminUsernameError = true;
         if ($password === '') $adminPasswordError = true;
     } else {
+        $rateStatus = authRateLimiterStatus($config, $adminRateScope, $adminRateId, $clientIp);
+        if (!empty($rateStatus['blocked'])) {
+            $adminError = authRateLimiterMessage($rateStatus);
+            $adminRateLimitSeconds = max(1, (int)($rateStatus['seconds_left'] ?? 0));
+            $adminRateLimitType = (string)($rateStatus['type'] ?? '');
+            $adminPasswordError = true;
+        } else {
         try {
             $manager = new MongoDB\Driver\Manager($config['uri']);
             $desiredRole = trim($_POST['role'] ?? 'admin');
@@ -99,32 +175,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_type']) && $_PO
             $cursor = $manager->executeQuery($namespace, $query);
             $users = $cursor->toArray();
             if (count($users) === 0) {
-                $adminError = 'Invalid admin credentials.';
+                $failStatus = authRateLimiterFail($config, $adminRateScope, $adminRateId, $clientIp);
+                $adminError = authRateLimiterMessage($failStatus);
+                $adminRateLimitSeconds = max(1, (int)($failStatus['seconds_left'] ?? 0));
+                $adminRateLimitType = (string)($failStatus['type'] ?? '');
                 $adminUsernameError = true;
             } else {
                 $user = (array)$users[0];
                 $storedPassword = $user['password'] ?? '';
                 $passwordMatch = (isset($user['password']) && password_verify($password, $storedPassword)) || $storedPassword === $password;
                 if ($passwordMatch) {
-                    $_SESSION['user_id'] = (string)$user['_id'];
-                    $_SESSION['user_email'] = $user['email'] ?? $username;
-                    $_SESSION['user_name'] = $user['name'] ?? $username;
-                    $_SESSION['user_username'] = $user['username'] ?? '';
-                    $sessionRole = $user['role'] ?? $desiredRole;
-                    $_SESSION['user_role'] = $sessionRole;
-                    if ($sessionRole === 'superadmin') {
-                        header('Location: Super%20Admin%20Side/dashboard.php');
+                    $restriction = getAccountRestrictionMessage($user);
+                    if ($restriction !== '') {
+                        $adminError = $restriction;
+                        activityLog($config, 'login_blocked', [
+                            'module' => 'auth',
+                            'login_type' => 'manual_admin',
+                            'reason' => $restriction,
+                            'target_username' => $username,
+                        ], 'blocked');
                     } else {
-                        header('Location: Admin%20Side/admin_dashboard.php');
+                        authRateLimiterReset($config, $adminRateScope, $adminRateId, $clientIp);
+                        $_SESSION['user_id'] = (string)$user['_id'];
+                        $_SESSION['user_email'] = $user['email'] ?? $username;
+                        $_SESSION['user_name'] = $user['name'] ?? $username;
+                        $_SESSION['user_username'] = $user['username'] ?? '';
+                        $sessionRole = $user['role'] ?? $desiredRole;
+                        $_SESSION['user_role'] = $sessionRole;
+                        if ($sessionRole === 'superadmin') {
+                            header('Location: Super%20Admin%20Side/dashboard.php');
+                        } else {
+                            header('Location: Admin%20Side/admin_dashboard.php');
+                        }
+                        activityLog($config, 'login_success', [
+                            'module' => 'auth',
+                            'login_type' => 'manual_admin',
+                            'role' => $sessionRole,
+                        ], 'success');
+                        exit;
                     }
-                    exit;
                 } else {
-                    $adminError = 'Invalid admin credentials.';
+                    $failStatus = authRateLimiterFail($config, $adminRateScope, $adminRateId, $clientIp);
+                    $adminError = authRateLimiterMessage($failStatus);
+                    $adminRateLimitSeconds = max(1, (int)($failStatus['seconds_left'] ?? 0));
+                    $adminRateLimitType = (string)($failStatus['type'] ?? '');
                     $adminPasswordError = true;
                 }
             }
         } catch (Exception $e) {
             $adminError = 'Login error: ' . $e->getMessage();
+        }
         }
     }
 }
@@ -133,12 +233,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login_type']) && $_PO
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['login_type']) || $_POST['login_type'] === 'staff') && isset($_POST['email']) && isset($_POST['password'])) {
     $email = trim($_POST['email']);
     $password = $_POST['password'];
+    $clientIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+    $staffRateScope = 'manual_staff_login';
+    $staffRateId = strtolower($email);
     
     if ($email === '' || $password === '') {
         $error = 'Email and password are required.';
         if ($email === '') $emailError = true;
         if ($password === '') $passwordError = true;
     } else {
+        $rateStatus = authRateLimiterStatus($config, $staffRateScope, $staffRateId, $clientIp);
+        if (!empty($rateStatus['blocked'])) {
+            $error = authRateLimiterMessage($rateStatus);
+            $staffRateLimitSeconds = max(1, (int)($rateStatus['seconds_left'] ?? 0));
+            $staffRateLimitType = (string)($rateStatus['type'] ?? '');
+            $passwordError = true;
+        } else {
         try {
             $manager = new MongoDB\Driver\Manager($config['uri']);
             $filter = ['email' => $email];
@@ -149,7 +259,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['login_type']) || $_
             $users = $cursor->toArray();
             
             if (count($users) === 0) {
-                $error = 'Invalid email or password.';
+                $failStatus = authRateLimiterFail($config, $staffRateScope, $staffRateId, $clientIp);
+                $error = authRateLimiterMessage($failStatus);
+                $staffRateLimitSeconds = max(1, (int)($failStatus['seconds_left'] ?? 0));
+                $staffRateLimitType = (string)($failStatus['type'] ?? '');
                 $emailError = true;
             } else {
                 $user = $users[0];
@@ -167,31 +280,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['login_type']) || $_
                 }
                 
                 if ($passwordMatch) {
-                    $_SESSION['user_id'] = (string)$userArray['_id'];
-                    $_SESSION['user_email'] = $email;
-                    $_SESSION['user_name'] = $userArray['name'] ?? $email;
-                    $_SESSION['user_username'] = $userArray['username'] ?? '';
-                    $_SESSION['user_role'] = $userArray['role'] ?? 'user';
-                    $_SESSION['user_photo'] = $userArray['photo'] ?? '';
-                    $_SESSION['user_signature'] = $userArray['signature'] ?? '';
-                    $role = $_SESSION['user_role'] ?? '';
-                    if ($role === 'superadmin') {
-                        header('Location: Super%20Admin%20Side/dashboard.php');
-                    } elseif ($role === 'admin') {
-                        header('Location: Admin%20Side/admin_dashboard.php');
-                    } elseif (in_array($role, ['departmenthead', 'department_head', 'dept_head'])) {
-                        header('Location: Department%20Heads%20Side/department_dashboard.php');
+                    $restriction = getAccountRestrictionMessage($userArray);
+                    if ($restriction !== '') {
+                        $error = $restriction;
+                        activityLog($config, 'login_blocked', [
+                            'module' => 'auth',
+                            'login_type' => 'manual_user',
+                            'reason' => $restriction,
+                            'target_email' => $email,
+                        ], 'blocked');
                     } else {
-                        header('Location: Front%20Desk%20Side/staff_dashboard.php');
+                        authRateLimiterReset($config, $staffRateScope, $staffRateId, $clientIp);
+                        $_SESSION['user_id'] = (string)$userArray['_id'];
+                        $_SESSION['user_email'] = $email;
+                        $_SESSION['user_name'] = $userArray['name'] ?? $email;
+                        $_SESSION['user_username'] = $userArray['username'] ?? '';
+                        $_SESSION['user_role'] = $userArray['role'] ?? 'user';
+                        $_SESSION['user_photo'] = $userArray['photo'] ?? '';
+                        $_SESSION['user_signature'] = $userArray['signature'] ?? '';
+                        $role = $_SESSION['user_role'] ?? '';
+                        if ($role === 'superadmin') {
+                            header('Location: Super%20Admin%20Side/dashboard.php');
+                        } elseif ($role === 'admin') {
+                            header('Location: Admin%20Side/admin_dashboard.php');
+                        } elseif (in_array($role, ['departmenthead', 'department_head', 'dept_head'])) {
+                            header('Location: Department%20Heads%20Side/department_dashboard.php');
+                        } else {
+                            header('Location: Front%20Desk%20Side/staff_dashboard.php');
+                        }
+                        activityLog($config, 'login_success', [
+                            'module' => 'auth',
+                            'login_type' => 'manual_user',
+                            'role' => $role,
+                        ], 'success');
+                        exit;
                     }
-                    exit;
                 } else {
-                    $error = 'Invalid email or password.';
+                    $failStatus = authRateLimiterFail($config, $staffRateScope, $staffRateId, $clientIp);
+                    $error = authRateLimiterMessage($failStatus);
+                    $staffRateLimitSeconds = max(1, (int)($failStatus['seconds_left'] ?? 0));
+                    $staffRateLimitType = (string)($failStatus['type'] ?? '');
                     $passwordError = true;
                 }
             }
         } catch (Exception $e) {
             $error = 'Login error: ' . $e->getMessage();
+        }
         }
     }
 }
@@ -843,7 +977,13 @@ footer{
                 <h3>Login</h3>
                 <?php if ($error): ?>
                     <div class="field-error-slot" style="margin-bottom: 1rem;">
-                        <span class="field-error"><?= htmlspecialchars($error) ?></span>
+                        <span
+                            class="field-error"
+                            <?php if ($staffRateLimitSeconds > 0): ?>
+                                data-rate-limit-seconds="<?= (int)$staffRateLimitSeconds ?>"
+                                data-rate-limit-type="<?= htmlspecialchars($staffRateLimitType) ?>"
+                            <?php endif; ?>
+                        ><?= htmlspecialchars($error) ?></span>
                     </div>
                 <?php endif; ?>
                 <form method="post">
@@ -1006,6 +1146,58 @@ function togglePassword(btn) {
 
     // initialize visibility on load
     updateToggleVisibility();
+})();
+
+(function() {
+    function setLoginControlsDisabled(errorEl, disabled) {
+        if (!errorEl) return;
+        var form = errorEl.closest('.login-card') && errorEl.closest('.login-card').querySelector('form');
+        if (!form) return;
+        var controls = form.querySelectorAll('input[name="email"], input[name="username"], input[name="password"], button[type="submit"]');
+        controls.forEach(function(ctrl) {
+            ctrl.disabled = !!disabled;
+        });
+    }
+
+    function formatLongCountdown(secondsLeft) {
+        var minutes = Math.floor(secondsLeft / 60);
+        var seconds = secondsLeft % 60;
+        return minutes + ' minute(s) ' + seconds + ' second(s)';
+    }
+
+    function applyCountdownMessage(el, secondsLeft, type) {
+        if (!el) return;
+        if (secondsLeft <= 0) {
+            el.textContent = 'You can try signing in again now.';
+            return;
+        }
+        if (type === 'long') {
+            el.textContent = 'Too many failed attempts. Please wait ' + formatLongCountdown(secondsLeft) + ' before trying again.';
+        } else {
+            el.textContent = 'Incorrect credentials. Please wait ' + secondsLeft + ' second(s) before trying again.';
+        }
+    }
+
+    var nodes = document.querySelectorAll('[data-rate-limit-seconds]');
+    if (!nodes.length) return;
+
+    nodes.forEach(function(el) {
+        var left = parseInt(el.getAttribute('data-rate-limit-seconds') || '0', 10);
+        var type = (el.getAttribute('data-rate-limit-type') || 'short').toLowerCase();
+        if (!left || left <= 0) return;
+        setLoginControlsDisabled(el, true);
+        applyCountdownMessage(el, left, type);
+        var timer = setInterval(function() {
+            left -= 1;
+            if (left <= 0) {
+                clearInterval(timer);
+                setLoginControlsDisabled(el, false);
+                applyCountdownMessage(el, 0, type);
+                return;
+            }
+            applyCountdownMessage(el, left, type);
+        }, 1000);
+    });
 })();
 
 <?php if ($error): ?>

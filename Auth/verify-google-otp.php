@@ -3,6 +3,8 @@ session_start();
 
 $config = require dirname(__DIR__) . '/config.php';
 require_once __DIR__ . '/smtp_mailer.php';
+require_once dirname(__DIR__) . '/Super Admin Side/_activity_logger.php';
+require_once __DIR__ . '/_auth_rate_limiter.php';
 $pending = $_SESSION['google_otp_pending_user'] ?? null;
 if (!$pending || !is_array($pending)) {
     header('Location: ../index.php');
@@ -63,8 +65,80 @@ function redirectByRole($role) {
     exit;
 }
 
+function getAccountRestrictionMeta($user) {
+    $state = strtolower(trim((string)($user['account_state'] ?? 'active')));
+    if ($state === '' || $state === 'active') {
+        return null;
+    }
+    if ($state === 'disabled') {
+        return [
+            'type' => 'disabled',
+            'reason' => trim((string)($user['disabled_reason'] ?? '')),
+            'days' => 0,
+        ];
+    }
+    if ($state === 'suspended') {
+        $until = $user['suspended_until'] ?? null;
+        $untilTs = null;
+        if ($until instanceof MongoDB\BSON\UTCDateTime) {
+            $untilTs = $until->toDateTime()->getTimestamp();
+        } elseif (is_numeric($until)) {
+            $untilTs = (int)$until;
+        }
+        if ($untilTs !== null && $untilTs <= time()) {
+            return null;
+        }
+        $days = 1;
+        if ($untilTs !== null) {
+            $days = (int)ceil(max(1, $untilTs - time()) / 86400);
+        }
+        return [
+            'type' => 'suspended',
+            'reason' => trim((string)($user['suspend_reason'] ?? '')),
+            'days' => max(1, $days),
+        ];
+    }
+    return null;
+}
+
+function clearPendingGoogleOtpState() {
+    unset(
+        $_SESSION['google_otp_pending_user'],
+        $_SESSION['google_otp_code_hash'],
+        $_SESSION['google_otp_expires_at'],
+        $_SESSION['google_otp_resend_at']
+    );
+}
+
+function redirectBlockedAccountToLogin($restriction) {
+    if (!is_array($restriction)) {
+        return;
+    }
+    if (($restriction['type'] ?? '') === 'disabled') {
+        $url = '../index.php?error=google_account_disabled';
+        if (!empty($restriction['reason'])) {
+            $url .= '&reason=' . urlencode($restriction['reason']);
+        }
+        header('Location: ' . $url);
+        exit;
+    }
+    if (($restriction['type'] ?? '') === 'suspended') {
+        $url = '../index.php?error=google_account_suspended&days=' . (int)($restriction['days'] ?? 1);
+        if (!empty($restriction['reason'])) {
+            $url .= '&reason=' . urlencode($restriction['reason']);
+        }
+        header('Location: ' . $url);
+        exit;
+    }
+}
+
 $error = '';
 $notice = '';
+$rateScope = 'google_otp_verify';
+$rateIdentifier = strtolower(trim((string)($pending['user_id'] ?? $pending['user_email'] ?? '')));
+$clientIp = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+$rateLimitSeconds = 0;
+$rateLimitType = '';
 
 if (isset($_POST['action']) && $_POST['action'] === 'resend') {
     $nextResendAt = (int)($_SESSION['google_otp_resend_at'] ?? 0);
@@ -89,15 +163,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['action']) || $_POST
     $otpInput = trim($_POST['otp'] ?? '');
     $otpHash = $_SESSION['google_otp_code_hash'] ?? '';
     $otpExpiresAt = (int)($_SESSION['google_otp_expires_at'] ?? 0);
-
-    if (!preg_match('/^\d{6}$/', $otpInput)) {
-        $error = 'Enter a valid 6-digit code.';
+    $rateStatus = authRateLimiterStatus($config, $rateScope, $rateIdentifier, $clientIp);
+    if (!empty($rateStatus['blocked'])) {
+        $error = authRateLimiterMessage($rateStatus);
+        $rateLimitSeconds = max(1, (int)($rateStatus['seconds_left'] ?? 0));
+        $rateLimitType = (string)($rateStatus['type'] ?? '');
+    } elseif (!preg_match('/^\d{6}$/', $otpInput)) {
+        $failStatus = authRateLimiterFail($config, $rateScope, $rateIdentifier, $clientIp);
+        $error = authRateLimiterMessage($failStatus);
+        $rateLimitSeconds = max(1, (int)($failStatus['seconds_left'] ?? 0));
+        $rateLimitType = (string)($failStatus['type'] ?? '');
     } elseif ($otpExpiresAt <= time()) {
         $error = 'Verification code expired. Please request a new code.';
     } elseif ($otpHash === '' || !password_verify($otpInput, $otpHash)) {
-        $error = 'Incorrect verification code.';
+        $failStatus = authRateLimiterFail($config, $rateScope, $rateIdentifier, $clientIp);
+        $error = authRateLimiterMessage($failStatus);
+        $rateLimitSeconds = max(1, (int)($failStatus['seconds_left'] ?? 0));
+        $rateLimitType = (string)($failStatus['type'] ?? '');
     } else {
+        authRateLimiterReset($config, $rateScope, $rateIdentifier, $clientIp);
+
+        try {
+            $manager = new MongoDB\Driver\Manager($config['uri']);
+            $namespace = $config['database'] . '.users';
+            $userId = trim((string)($pending['user_id'] ?? ''));
+            if (!preg_match('/^[a-f0-9]{24}$/i', $userId)) {
+                clearPendingGoogleOtpState();
+                header('Location: ../index.php?error=google_login_failed');
+                exit;
+            }
+            $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($userId)], ['limit' => 1]);
+            $cursor = $manager->executeQuery($namespace, $query);
+            $rows = $cursor->toArray();
+            if (count($rows) === 0) {
+                clearPendingGoogleOtpState();
+                header('Location: ../index.php?error=google_not_authorized');
+                exit;
+            }
+            $latestUser = (array)$rows[0];
+            $restriction = getAccountRestrictionMeta($latestUser);
+            if (is_array($restriction)) {
+                activityLog($config, 'login_blocked', [
+                    'module' => 'auth',
+                    'login_type' => 'google_sso_otp',
+                    'reason' => ($restriction['type'] ?? 'blocked'),
+                    'target_email' => (string)($pending['user_email'] ?? ''),
+                ], 'blocked', [
+                    'id' => (string)($pending['user_id'] ?? ''),
+                    'email' => (string)($pending['user_email'] ?? ''),
+                    'name' => (string)($pending['user_name'] ?? ''),
+                    'role' => (string)($pending['user_role'] ?? ''),
+                ]);
+                clearPendingGoogleOtpState();
+                redirectBlockedAccountToLogin($restriction);
+            }
+        } catch (Exception $e) {
+            clearPendingGoogleOtpState();
+            header('Location: ../index.php?error=google_login_failed');
+            exit;
+        }
+
         finalizeLoginFromPending($pending);
+        activityLog($config, 'login_success', [
+            'module' => 'auth',
+            'login_type' => 'google_sso',
+            'role' => (string)($_SESSION['user_role'] ?? ''),
+        ], 'success', [
+            'id' => (string)($_SESSION['user_id'] ?? ''),
+            'email' => (string)($_SESSION['user_email'] ?? ''),
+            'name' => (string)($_SESSION['user_name'] ?? ''),
+            'role' => (string)($_SESSION['user_role'] ?? ''),
+        ]);
         redirectByRole($_SESSION['user_role'] ?? 'user');
     }
 }
@@ -211,7 +347,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['action']) || $_POST
         <p>We sent a 6-digit code to <span class="email"><?= htmlspecialchars($pending['user_email'] ?? '') ?></span>. Enter the code to continue.</p>
 
         <?php if ($error !== ''): ?>
-            <div class="msg error"><?= htmlspecialchars($error) ?></div>
+            <div
+                class="msg error"
+                <?php if ($rateLimitSeconds > 0): ?>
+                    data-rate-limit-seconds="<?= (int)$rateLimitSeconds ?>"
+                    data-rate-limit-type="<?= htmlspecialchars($rateLimitType) ?>"
+                <?php endif; ?>
+            ><?= htmlspecialchars($error) ?></div>
         <?php endif; ?>
         <?php if ($notice !== ''): ?>
             <div class="msg ok"><?= htmlspecialchars($notice) ?></div>
@@ -234,5 +376,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (!isset($_POST['action']) || $_POST
             <a class="back-link" href="../index.php">Back to Login</a>
         </div>
     </div>
+    <script>
+    (function() {
+        function formatLongCountdown(secondsLeft) {
+            var minutes = Math.floor(secondsLeft / 60);
+            var seconds = secondsLeft % 60;
+            return minutes + ' minute(s) ' + seconds + ' second(s)';
+        }
+
+        function applyCountdownMessage(el, secondsLeft, type) {
+            if (!el) return;
+            if (secondsLeft <= 0) {
+                el.textContent = 'You can try verifying again now.';
+                return;
+            }
+            if (type === 'long') {
+                el.textContent = 'Too many failed attempts. Please wait ' + formatLongCountdown(secondsLeft) + ' before trying again.';
+            } else {
+                el.textContent = 'Incorrect credentials. Please wait ' + secondsLeft + ' second(s) before trying again.';
+            }
+        }
+
+        var el = document.querySelector('[data-rate-limit-seconds]');
+        if (!el) return;
+        var left = parseInt(el.getAttribute('data-rate-limit-seconds') || '0', 10);
+        var type = (el.getAttribute('data-rate-limit-type') || 'short').toLowerCase();
+        if (!left || left <= 0) return;
+        applyCountdownMessage(el, left, type);
+        var timer = setInterval(function() {
+            left -= 1;
+            if (left <= 0) {
+                clearInterval(timer);
+                applyCountdownMessage(el, 0, type);
+                return;
+            }
+            applyCountdownMessage(el, left, type);
+        }, 1000);
+    })();
+    </script>
 </body>
 </html>

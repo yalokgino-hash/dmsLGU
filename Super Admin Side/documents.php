@@ -8,6 +8,7 @@ if (!isset($_SESSION['user_id'])) {
 }
 
 require_once __DIR__ . '/_account_helpers.php';
+require_once __DIR__ . '/_activity_logger.php';
 
 $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
 $userEmail = $_SESSION['user_email'] ?? '';
@@ -95,6 +96,12 @@ if (!empty($_GET['send']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['send'])) {
                 'sentByUserName'  => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
             ]);
             $manager->executeBulkWrite($sentToAdminNamespace, $bulk);
+            activityLog($config, 'document_send_to_admin', [
+                'module' => 'super_admin_documents',
+                'document_id' => $sendId,
+                'document_code' => (string)$docCode,
+                'document_title' => (string)$docTitle,
+            ]);
         }
     } catch (Exception $e) {}
     header('Location: documents.php?sent=1');
@@ -136,6 +143,12 @@ if (!empty($_GET['archive']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['archive']
             $deleteBulk = new MongoDB\Driver\BulkWrite;
             $deleteBulk->delete(['documentId' => $archiveId], ['limit' => 0]);
             $manager->executeBulkWrite($sentNamespace, $deleteBulk);
+            activityLog($config, 'document_archive', [
+                'module' => 'super_admin_documents',
+                'document_id' => $archiveId,
+                'document_code' => (string)$docCode,
+                'document_title' => (string)$docTitle,
+            ]);
         }
     } catch (Exception $e) {}
     header('Location: documents.php');
@@ -174,6 +187,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         'status'        => 'active',
                     ]);
                     $manager->executeBulkWrite($documentsNamespace, $bulk);
+                    activityLog($config, 'document_add', [
+                        'module' => 'super_admin_documents',
+                        'document_code' => $documentCode,
+                        'document_title' => $documentTitle,
+                        'file_name' => (string)$fname,
+                    ]);
                     header('Location: documents.php?added=1');
                     exit;
                 } catch (Exception $e) {

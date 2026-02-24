@@ -18,6 +18,7 @@ if ($userRole === 'superadmin') {
 $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
 
 $config = require __DIR__ . '/../config.php';
+require_once __DIR__ . '/../Super Admin Side/_activity_logger.php';
 $documentsNamespace = $config['database'] . '.documents';
 
 // Send document to Super Admin (record in sent_to_super_admin)
@@ -45,6 +46,12 @@ if (!empty($_GET['send']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['send'])) {
                 'sentByUserName' => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
             ]);
             $manager->executeBulkWrite($sentNamespace, $bulk);
+            activityLog($config, 'document_send_to_super_admin', [
+                'module' => 'front_desk_documents',
+                'document_id' => $sendId,
+                'document_code' => (string)$docCode,
+                'document_title' => (string)$docTitle,
+            ]);
         }
     } catch (Exception $e) {}
     header('Location: documents.php?sent=1');
