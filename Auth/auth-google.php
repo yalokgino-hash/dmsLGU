@@ -7,6 +7,7 @@ session_start();
 
 $config = require dirname(__DIR__) . '/config.php';
 require_once __DIR__ . '/smtp_mailer.php';
+require_once dirname(__DIR__) . '/Super Admin Side/_activity_logger.php';
 $clientId = $config['google_client_id'] ?? '';
 $clientSecret = $config['google_client_secret'] ?? '';
 
@@ -53,6 +54,42 @@ function sendOtpEmail($toEmail, $otp, $config, $displayName = '') {
         . "DMS LGU Solano";
 
     return sendEmailViaSmtp($toEmail, $subject, $message, $config);
+}
+
+function getAccountRestrictionMeta($user) {
+    $state = strtolower(trim((string)($user['account_state'] ?? 'active')));
+    if ($state === '' || $state === 'active') {
+        return null;
+    }
+    if ($state === 'disabled') {
+        return [
+            'type' => 'disabled',
+            'reason' => trim((string)($user['disabled_reason'] ?? '')),
+            'days' => 0,
+        ];
+    }
+    if ($state === 'suspended') {
+        $until = $user['suspended_until'] ?? null;
+        $untilTs = null;
+        if ($until instanceof MongoDB\BSON\UTCDateTime) {
+            $untilTs = $until->toDateTime()->getTimestamp();
+        } elseif (is_numeric($until)) {
+            $untilTs = (int)$until;
+        }
+        if ($untilTs !== null && $untilTs <= time()) {
+            return null;
+        }
+        $days = 1;
+        if ($untilTs !== null) {
+            $days = (int)ceil(max(1, $untilTs - time()) / 86400);
+        }
+        return [
+            'type' => 'suspended',
+            'reason' => trim((string)($user['suspend_reason'] ?? '')),
+            'days' => max(1, $days),
+        ];
+    }
+    return null;
 }
 
 // Step 1: No code yet — redirect to Google consent
@@ -136,12 +173,60 @@ try {
 
     if (count($users) === 0) {
         // Email not in database — pass email to no-access page via session
+        activityLog($config, 'login_blocked', [
+            'module' => 'auth',
+            'login_type' => 'google_sso',
+            'reason' => 'google_email_not_authorized',
+            'target_email' => $email,
+        ], 'blocked', ['email' => $email, 'name' => $name, 'role' => 'guest']);
         $_SESSION['unauthorized_email'] = $email;
         header('Location: no-access.php?google=1');
         exit;
     }
 
     $user = (array)$users[0];
+    $resolvedActorName = trim((string)($user['name'] ?? ''));
+    if ($resolvedActorName === '') {
+        $resolvedActorName = trim((string)($user['username'] ?? ''));
+    }
+    if ($resolvedActorName === '') {
+        $resolvedActorName = $email;
+    }
+    $resolvedActorRole = trim((string)($user['role'] ?? 'user'));
+
+    $restriction = getAccountRestrictionMeta($user);
+    if (is_array($restriction)) {
+        if ($restriction['type'] === 'disabled') {
+            activityLog($config, 'login_blocked', [
+                'module' => 'auth',
+                'login_type' => 'google_sso',
+                'reason' => 'account_disabled',
+                'target_email' => $email,
+            ], 'blocked', ['id' => (string)($user['_id'] ?? ''), 'email' => $email, 'name' => $resolvedActorName, 'role' => $resolvedActorRole]);
+            $url = '../index.php?error=google_account_disabled';
+            if (!empty($restriction['reason'])) {
+                $url .= '&reason=' . urlencode($restriction['reason']);
+            }
+            header('Location: ' . $url);
+            exit;
+        }
+        if ($restriction['type'] === 'suspended') {
+            activityLog($config, 'login_blocked', [
+                'module' => 'auth',
+                'login_type' => 'google_sso',
+                'reason' => 'account_suspended',
+                'days' => (string)($restriction['days'] ?? ''),
+                'target_email' => $email,
+            ], 'blocked', ['id' => (string)($user['_id'] ?? ''), 'email' => $email, 'name' => $resolvedActorName, 'role' => $resolvedActorRole]);
+            $url = '../index.php?error=google_account_suspended&days=' . (int)$restriction['days'];
+            if (!empty($restriction['reason'])) {
+                $url .= '&reason=' . urlencode($restriction['reason']);
+            }
+            header('Location: ' . $url);
+            exit;
+        }
+    }
+
     $otp = str_pad((string)random_int(0, 999999), 6, '0', STR_PAD_LEFT);
     $expiryMinutes = (int)($config['otp_expiry_minutes'] ?? 5);
     if ($expiryMinutes <= 0) {
@@ -160,7 +245,6 @@ try {
     $_SESSION['google_otp_code_hash'] = password_hash($otp, PASSWORD_DEFAULT);
     $_SESSION['google_otp_expires_at'] = time() + ($expiryMinutes * 60);
     $_SESSION['google_otp_resend_at'] = time() + 30;
-
     $otpName = trim($user['name'] ?? '') ?: (trim($user['username'] ?? '') ?: $email);
     if (!sendOtpEmail($email, $otp, $config, $otpName)) {
         unset(

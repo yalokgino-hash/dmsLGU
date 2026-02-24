@@ -19,6 +19,7 @@ $config = require dirname(__DIR__) . '/config.php';
 $namespace = $config['database'] . '.offices';
 require_once __DIR__ . '/_account_helpers.php';
 require_once __DIR__ . '/_notifications_super_admin.php';
+require_once __DIR__ . '/_activity_logger.php';
 $notifData = getSuperAdminNotifications($config);
 $notifCount = $notifData['count'];
 $notifItems = $notifData['items'];
@@ -266,6 +267,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $flash = updateUserPhoto($_SESSION['user_id'], $_POST['photo']);
     }
     if ($flash) {
+        if (!empty($flash['success'])) {
+            if ($action === 'add') {
+                activityLog($config, 'office_add', [
+                    'module' => 'super_admin_offices',
+                    'office_code' => trim((string)($_POST['office_code'] ?? '')),
+                    'office_name' => trim((string)($_POST['office_name'] ?? '')),
+                ]);
+            } elseif ($action === 'update') {
+                activityLog($config, 'office_update', [
+                    'module' => 'super_admin_offices',
+                    'office_id' => trim((string)($_POST['office_id'] ?? '')),
+                    'office_code' => trim((string)($_POST['office_code'] ?? '')),
+                    'office_name' => trim((string)($_POST['office_name'] ?? '')),
+                ]);
+            } elseif ($action === 'assign_head') {
+                activityLog($config, 'office_assign_head', [
+                    'module' => 'super_admin_offices',
+                    'office_id' => trim((string)($_POST['office_id'] ?? '')),
+                    'office_head_id' => trim((string)($_POST['office_head_id'] ?? '')),
+                ]);
+            } elseif ($action === 'delete') {
+                activityLog($config, 'office_delete', [
+                    'module' => 'super_admin_offices',
+                    'office_id' => trim((string)($_POST['office_id'] ?? '')),
+                ]);
+            }
+        }
         header('Location: offices-department.php?msg=' . urlencode($flash['message']) . '&ok=' . ($flash['success'] ? '1' : '0'));
         exit;
     }

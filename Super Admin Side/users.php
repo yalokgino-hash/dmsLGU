@@ -20,6 +20,7 @@ if (!isset($config)) {
     $config = require dirname(__DIR__) . '/config.php';
 }
 require_once __DIR__ . '/_notifications_super_admin.php';
+require_once __DIR__ . '/_activity_logger.php';
 $notifData = getSuperAdminNotifications($config);
 $notifCount = $notifData['count'];
 $notifItems = $notifData['items'];
@@ -101,6 +102,108 @@ function addUser($config, $username, $name, $email, $password, $role) {
     }
 }
 
+/**
+ * Disable or suspend a user account.
+ * @return array ['success' => bool, 'message' => string]
+ */
+function updateUserAccountState($config, $targetUserId, $mode, $reason, $durationValue = 0, $durationUnit = 'hours') {
+    $targetUserId = trim((string)$targetUserId);
+    $mode = strtolower(trim((string)$mode));
+    $reason = trim((string)$reason);
+    $durationValue = (int)$durationValue;
+    $durationUnit = strtolower(trim((string)$durationUnit));
+
+    if (!preg_match('/^[a-f0-9]{24}$/i', $targetUserId)) {
+        return ['success' => false, 'message' => 'Invalid user ID.'];
+    }
+    if (!in_array($mode, ['disable', 'suspend', 'enable'], true)) {
+        return ['success' => false, 'message' => 'Invalid account action.'];
+    }
+    if (in_array($mode, ['disable', 'suspend'], true) && $reason === '') {
+        return ['success' => false, 'message' => 'Reason is required.'];
+    }
+    if (!empty($_SESSION['user_id']) && $targetUserId === (string)$_SESSION['user_id']) {
+        return ['success' => false, 'message' => 'You cannot apply this action to your own account.'];
+    }
+
+    $namespace = $config['database'] . '.users';
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $filter = ['_id' => new MongoDB\BSON\ObjectId($targetUserId)];
+        $update = ['$set' => []];
+
+        if ($mode === 'disable') {
+            $update['$set'] = [
+                'account_state' => 'disabled',
+                'disabled_reason' => $reason,
+                'disabled_at' => new MongoDB\BSON\UTCDateTime(),
+            ];
+            $update['$unset'] = [
+                'suspend_reason' => 1,
+                'suspended_at' => 1,
+                'suspended_until' => 1,
+                'suspend_duration_value' => 1,
+                'suspend_duration_unit' => 1,
+            ];
+        } elseif ($mode === 'suspend') {
+            $allowedUnits = ['hours', 'days', 'weeks', 'months', 'years'];
+            if ($durationValue <= 0) {
+                return ['success' => false, 'message' => 'Suspend duration must be greater than zero.'];
+            }
+            if (!in_array($durationUnit, $allowedUnits, true)) {
+                return ['success' => false, 'message' => 'Invalid suspend duration unit.'];
+            }
+            $map = ['hours' => 'hour', 'days' => 'day', 'weeks' => 'week', 'months' => 'month', 'years' => 'year'];
+            $untilDt = new DateTime('now', new DateTimeZone('UTC'));
+            $untilDt->modify('+' . $durationValue . ' ' . $map[$durationUnit]);
+            $untilMs = ((int)$untilDt->format('U')) * 1000;
+
+            $update['$set'] = [
+                'account_state' => 'suspended',
+                'suspend_reason' => $reason,
+                'suspended_at' => new MongoDB\BSON\UTCDateTime(),
+                'suspended_until' => new MongoDB\BSON\UTCDateTime($untilMs),
+                'suspend_duration_value' => $durationValue,
+                'suspend_duration_unit' => $durationUnit,
+            ];
+            $update['$unset'] = [
+                'disabled_reason' => 1,
+                'disabled_at' => 1,
+            ];
+        } else {
+            $update['$set'] = [
+                'account_state' => 'active',
+                'enabled_at' => new MongoDB\BSON\UTCDateTime(),
+            ];
+            $update['$unset'] = [
+                'disabled_reason' => 1,
+                'disabled_at' => 1,
+                'suspend_reason' => 1,
+                'suspended_at' => 1,
+                'suspended_until' => 1,
+                'suspend_duration_value' => 1,
+                'suspend_duration_unit' => 1,
+            ];
+        }
+
+        $bulk = new MongoDB\Driver\BulkWrite;
+        $bulk->update($filter, $update, ['multi' => false, 'upsert' => false]);
+        $result = $manager->executeBulkWrite($namespace, $bulk);
+        if ($result->getModifiedCount() < 1) {
+            return ['success' => false, 'message' => 'No changes applied. User may not exist.'];
+        }
+        if ($mode === 'disable') {
+            return ['success' => true, 'message' => 'User disabled successfully.'];
+        }
+        if ($mode === 'suspend') {
+            return ['success' => true, 'message' => 'User suspended successfully.'];
+        }
+        return ['success' => true, 'message' => 'User enabled successfully.'];
+    } catch (Exception $e) {
+        return ['success' => false, 'message' => 'Error: ' . $e->getMessage()];
+    }
+}
+
 $msg = $_GET['msg'] ?? null;
 $msgOk = isset($_GET['ok']) && $_GET['ok'] === '1';
 $search = trim($_GET['search'] ?? '');
@@ -118,9 +221,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['role'] ?? 'user'
         );
         if ($flash) {
+            if (!empty($flash['success'])) {
+                activityLog($config, 'user_add', [
+                    'module' => 'super_admin_users',
+                    'target_name' => trim((string)($_POST['name'] ?? $_POST['username'] ?? $_POST['email'] ?? '')),
+                    'target_username' => trim((string)($_POST['username'] ?? '')),
+                    'target_email' => trim((string)($_POST['email'] ?? '')),
+                    'target_role' => trim((string)($_POST['role'] ?? 'user')),
+                ]);
+            }
             header('Location: users.php?msg=' . urlencode($flash['message']) . '&ok=' . ($flash['success'] ? '1' : '0'));
             exit;
         }
+    } elseif ($action === 'disable_user') {
+        $flash = updateUserAccountState(
+            $config,
+            $_POST['user_id'] ?? '',
+            'disable',
+            $_POST['reason'] ?? ''
+        );
+        if (!empty($flash['success'])) {
+            activityLog($config, 'user_disable', [
+                'module' => 'super_admin_users',
+                'target_user_id' => trim((string)($_POST['user_id'] ?? '')),
+                'target_name' => trim((string)($_POST['target_name'] ?? '')),
+                'reason' => trim((string)($_POST['reason'] ?? '')),
+            ]);
+        }
+        header('Location: users.php?msg=' . urlencode($flash['message']) . '&ok=' . ($flash['success'] ? '1' : '0'));
+        exit;
+    } elseif ($action === 'suspend_user') {
+        $flash = updateUserAccountState(
+            $config,
+            $_POST['user_id'] ?? '',
+            'suspend',
+            $_POST['reason'] ?? '',
+            (int)($_POST['duration_value'] ?? 0),
+            $_POST['duration_unit'] ?? 'hours'
+        );
+        if (!empty($flash['success'])) {
+            activityLog($config, 'user_suspend', [
+                'module' => 'super_admin_users',
+                'target_user_id' => trim((string)($_POST['user_id'] ?? '')),
+                'target_name' => trim((string)($_POST['target_name'] ?? '')),
+                'duration_value' => (string)((int)($_POST['duration_value'] ?? 0)),
+                'duration_unit' => trim((string)($_POST['duration_unit'] ?? '')),
+                'reason' => trim((string)($_POST['reason'] ?? '')),
+            ]);
+        }
+        header('Location: users.php?msg=' . urlencode($flash['message']) . '&ok=' . ($flash['success'] ? '1' : '0'));
+        exit;
+    } elseif ($action === 'enable_user') {
+        $flash = updateUserAccountState(
+            $config,
+            $_POST['user_id'] ?? '',
+            'enable',
+            ''
+        );
+        if (!empty($flash['success'])) {
+            activityLog($config, 'user_enable', [
+                'module' => 'super_admin_users',
+                'target_user_id' => trim((string)($_POST['user_id'] ?? '')),
+                'target_name' => trim((string)($_POST['target_name'] ?? '')),
+            ]);
+        }
+        header('Location: users.php?msg=' . urlencode($flash['message']) . '&ok=' . ($flash['success'] ? '1' : '0'));
+        exit;
     }
 }
 
@@ -144,6 +310,26 @@ function formatRoleLabel($role) {
         'dept_head' => 'Department Head',
     ];
     return $labels[$r] ?? ucfirst($r) ?: '—';
+}
+
+function getUserAccountStatusMeta($u) {
+    $state = strtolower(trim((string)($u['account_state'] ?? 'active')));
+    if ($state === '') $state = 'active';
+    if ($state === 'suspended') {
+        $until = $u['suspended_until'] ?? null;
+        if ($until instanceof MongoDB\BSON\UTCDateTime) {
+            $untilDt = $until->toDateTime()->setTimezone(new DateTimeZone('Asia/Manila'));
+            if ($untilDt->getTimestamp() <= time()) {
+                return ['label' => 'Active', 'class' => 'active', 'hint' => ''];
+            }
+            return ['label' => 'Suspended', 'class' => 'suspended', 'hint' => 'Until ' . $untilDt->format('M j, Y g:i A')];
+        }
+        return ['label' => 'Suspended', 'class' => 'suspended', 'hint' => ''];
+    }
+    if ($state === 'disabled') {
+        return ['label' => 'Disabled', 'class' => 'disabled', 'hint' => ''];
+    }
+    return ['label' => 'Active', 'class' => 'active', 'hint' => ''];
 }
 
 ?>
@@ -190,10 +376,22 @@ function formatRoleLabel($role) {
         .users-role-badge.admin { background: #dbeafe; color: #1e40af; }
         .users-role-badge.departmenthead, .users-role-badge.department_head, .users-role-badge.dept_head { background: #e0e7ff; color: #3730a3; }
         .users-role-badge.user, .users-role-badge.staff { background: #f1f5f9; color: #475569; }
+        .users-status-badge { display: inline-block; padding: 4px 10px; border-radius: 999px; font-size: 0.75rem; font-weight: 600; line-height: 1.2; }
+        .users-status-badge.active { background: #dcfce7; color: #166534; }
+        .users-status-badge.disabled { background: #fee2e2; color: #991b1b; }
+        .users-status-badge.suspended { background: #fef3c7; color: #92400e; }
+        .users-status-hint { display: block; margin-top: 4px; font-size: 0.72rem; color: #64748b; }
         .users-action-cell { white-space: nowrap; }
         .users-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; font-size: 0.85rem; font-weight: 500; text-decoration: none; color: #475569; background: #f1f5f9; border: 1px solid #e2e8f0; cursor: pointer; transition: background 0.2s, color 0.2s; font-family: inherit; }
         .users-action-btn:hover { background: #e2e8f0; color: #1e293b; }
         .users-action-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .users-action-btn.disable { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
+        .users-action-btn.disable:hover { background: #fecaca; color: #991b1b; }
+        .users-action-btn.suspend { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+        .users-action-btn.suspend:hover { background: #fde68a; color: #78350f; }
+        .users-action-btn.enable { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+        .users-action-btn.enable:hover { background: #bbf7d0; color: #14532d; }
+        .users-action-stack { display: inline-flex; gap: 8px; flex-wrap: wrap; }
         .offices-empty { padding: 2rem; text-align: center; color: #64748b; font-size: 0.95rem; }
         #add-user-modal .doc-modal-dialog { width: min(560px, calc(100vw - 24px)); border-radius: 14px; overflow: hidden; }
         #add-user-modal .doc-modal-header { padding: 16px 18px; border-bottom: 1px solid #e2e8f0; background: #ffffff; }
@@ -285,6 +483,7 @@ function formatRoleLabel($role) {
                                     <th>Name</th>
                                     <th>Email</th>
                                     <th>Role</th>
+                                    <th>Status</th>
                                     <th>Office / Department</th>
                                     <th>Action</th>
                                 </tr>
@@ -292,7 +491,7 @@ function formatRoleLabel($role) {
                             <tbody id="users-table-body">
                                 <?php if (count($usersList) === 0): ?>
                                 <tr>
-                                    <td colspan="6" class="offices-empty" id="no-users-row">No users found. Try adjusting the search or filter, or add a new user.</td>
+                                    <td colspan="7" class="offices-empty" id="no-users-row">No users found. Try adjusting the search or filter, or add a new user.</td>
                                 </tr>
                                 <?php else:
                                     $no = 1;
@@ -303,18 +502,39 @@ function formatRoleLabel($role) {
                                         if ($dept === '') $dept = '—';
                                         $rawRole = strtolower(trim($u['role'] ?? ''));
                                         $roleClass = $rawRole ?: 'user';
+                                        $statusMeta = getUserAccountStatusMeta($u);
+                                        $showEnableBtn = in_array($statusMeta['class'], ['disabled', 'suspended'], true);
                                 ?>
                                 <tr>
                                     <td><?= (int)$no ?></td>
                                     <td><?= htmlspecialchars($displayName) ?></td>
                                     <td><?= htmlspecialchars(trim($u['email'] ?? '') ?: '—') ?></td>
                                     <td><span class="users-role-badge <?= htmlspecialchars($roleClass) ?>"><?= htmlspecialchars(formatRoleLabel($u['role'] ?? '')) ?></span></td>
+                                    <td>
+                                        <span class="users-status-badge <?= htmlspecialchars($statusMeta['class']) ?>"><?= htmlspecialchars($statusMeta['label']) ?></span>
+                                        <?php if (!empty($statusMeta['hint'])): ?>
+                                        <small class="users-status-hint"><?= htmlspecialchars($statusMeta['hint']) ?></small>
+                                        <?php endif; ?>
+                                    </td>
                                     <td><?= htmlspecialchars($dept) ?></td>
                                     <td class="users-action-cell">
-                                        <a href="edit_user.php?id=<?= htmlspecialchars($u['_id'] ?? '') ?>" class="users-action-btn" title="Edit user">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                            Edit
-                                        </a>
+                                        <div class="users-action-stack">
+                                            <a href="edit_user.php?id=<?= htmlspecialchars($u['_id'] ?? '') ?>" class="users-action-btn" title="Edit user">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                                Edit
+                                            </a>
+                                            <?php if ($showEnableBtn): ?>
+                                            <form method="post" style="display:inline;" onsubmit="return confirm('Enable this account? The user will be able to login again.');">
+                                                <input type="hidden" name="action" value="enable_user">
+                                                <input type="hidden" name="user_id" value="<?= htmlspecialchars($u['_id'] ?? '') ?>">
+                                                <input type="hidden" name="target_name" value="<?= htmlspecialchars($displayName) ?>">
+                                                <button type="submit" class="users-action-btn enable" title="Enable user">Enable</button>
+                                            </form>
+                                            <?php else: ?>
+                                            <button type="button" class="users-action-btn disable js-disable-user-btn" data-user-id="<?= htmlspecialchars($u['_id'] ?? '') ?>" data-user-name="<?= htmlspecialchars($displayName) ?>" title="Disable user">Disable</button>
+                                            <button type="button" class="users-action-btn suspend js-suspend-user-btn" data-user-id="<?= htmlspecialchars($u['_id'] ?? '') ?>" data-user-name="<?= htmlspecialchars($displayName) ?>" title="Suspend user">Suspend</button>
+                                            <?php endif; ?>
+                                        </div>
                                     </td>
                                 </tr>
                                 <?php
@@ -376,6 +596,73 @@ function formatRoleLabel($role) {
         </div>
     </div>
 
+    <div class="doc-modal" id="disable-user-modal" hidden>
+        <button type="button" class="doc-modal-overlay" data-close-disable-user aria-label="Close"></button>
+        <div class="doc-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="disable-user-title">
+            <div class="doc-modal-header">
+                <h2 id="disable-user-title">Disable User</h2>
+                <button type="button" class="doc-modal-close" data-close-disable-user aria-label="Close">&times;</button>
+            </div>
+            <form method="post" id="disable-user-form" class="doc-modal-form">
+                <input type="hidden" name="action" value="disable_user">
+                <input type="hidden" name="user_id" id="disable-user-id" value="">
+                <input type="hidden" name="target_name" id="disable-target-name" value="">
+                <div class="doc-form-field">
+                    <label>User</label>
+                    <input type="text" id="disable-user-name" value="" readonly>
+                </div>
+                <div class="doc-form-field">
+                    <label for="disable-user-reason">Reason <span class="required">*</span></label>
+                    <input type="text" id="disable-user-reason" name="reason" placeholder="Reason for disabling this account" required>
+                </div>
+                <div class="doc-modal-actions">
+                    <button type="button" class="doc-btn doc-btn-cancel" data-close-disable-user>Cancel</button>
+                    <button type="submit" class="doc-btn doc-btn-save">Disable User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="doc-modal" id="suspend-user-modal" hidden>
+        <button type="button" class="doc-modal-overlay" data-close-suspend-user aria-label="Close"></button>
+        <div class="doc-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="suspend-user-title">
+            <div class="doc-modal-header">
+                <h2 id="suspend-user-title">Suspend User</h2>
+                <button type="button" class="doc-modal-close" data-close-suspend-user aria-label="Close">&times;</button>
+            </div>
+            <form method="post" id="suspend-user-form" class="doc-modal-form">
+                <input type="hidden" name="action" value="suspend_user">
+                <input type="hidden" name="user_id" id="suspend-user-id" value="">
+                <input type="hidden" name="target_name" id="suspend-target-name" value="">
+                <div class="doc-form-field">
+                    <label>User</label>
+                    <input type="text" id="suspend-user-name" value="" readonly>
+                </div>
+                <div class="doc-form-field">
+                    <label>Suspend for <span class="required">*</span></label>
+                    <div style="display:flex;gap:8px;">
+                        <input type="number" min="1" step="1" id="suspend-duration-value" name="duration_value" placeholder="Value" required style="max-width:130px;">
+                        <select id="suspend-duration-unit" name="duration_unit" required>
+                            <option value="hours">Hours</option>
+                            <option value="days">Days</option>
+                            <option value="weeks">Weeks</option>
+                            <option value="months">Months</option>
+                            <option value="years">Years</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="doc-form-field">
+                    <label for="suspend-user-reason">Reason <span class="required">*</span></label>
+                    <input type="text" id="suspend-user-reason" name="reason" placeholder="Reason for suspension" required>
+                </div>
+                <div class="doc-modal-actions">
+                    <button type="button" class="doc-btn doc-btn-cancel" data-close-suspend-user>Cancel</button>
+                    <button type="submit" class="doc-btn doc-btn-save">Suspend User</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
     (function() {
         var addBtn = document.getElementById('add-user-btn');
@@ -405,6 +692,84 @@ function formatRoleLabel($role) {
         }
         var editBtn = document.getElementById('edit-user-btn');
         if (editBtn) editBtn.addEventListener('click', function() { alert('Select a user row to edit.'); });
+
+        var disableModal = document.getElementById('disable-user-modal');
+        var disableForm = document.getElementById('disable-user-form');
+        var disableUserId = document.getElementById('disable-user-id');
+        var disableTargetName = document.getElementById('disable-target-name');
+        var disableUserName = document.getElementById('disable-user-name');
+        var disableReason = document.getElementById('disable-user-reason');
+        function openDisableModal(userId, userName) {
+            if (!disableModal) return;
+            if (disableUserId) disableUserId.value = userId || '';
+            if (disableTargetName) disableTargetName.value = userName || '';
+            if (disableUserName) disableUserName.value = userName || '';
+            if (disableReason) disableReason.value = '';
+            disableModal.hidden = false;
+            document.body.classList.add('modal-open');
+        }
+        function closeDisableModal() {
+            if (!disableModal) return;
+            disableModal.hidden = true;
+            document.body.classList.remove('modal-open');
+            if (disableForm) disableForm.reset();
+        }
+        document.querySelectorAll('.js-disable-user-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                openDisableModal(btn.getAttribute('data-user-id') || '', btn.getAttribute('data-user-name') || 'User');
+            });
+        });
+        document.querySelectorAll('[data-close-disable-user]').forEach(function(btn) { btn.addEventListener('click', closeDisableModal); });
+        if (disableForm) {
+            disableForm.addEventListener('submit', function(e) {
+                if (!disableUserId || disableUserId.value.trim() === '') {
+                    e.preventDefault();
+                    alert('No target user selected.');
+                }
+            });
+        }
+
+        var suspendModal = document.getElementById('suspend-user-modal');
+        var suspendForm = document.getElementById('suspend-user-form');
+        var suspendUserId = document.getElementById('suspend-user-id');
+        var suspendTargetName = document.getElementById('suspend-target-name');
+        var suspendUserName = document.getElementById('suspend-user-name');
+        var suspendDurationValue = document.getElementById('suspend-duration-value');
+        function openSuspendModal(userId, userName) {
+            if (!suspendModal) return;
+            if (suspendUserId) suspendUserId.value = userId || '';
+            if (suspendTargetName) suspendTargetName.value = userName || '';
+            if (suspendUserName) suspendUserName.value = userName || '';
+            if (suspendDurationValue) suspendDurationValue.value = '';
+            suspendModal.hidden = false;
+            document.body.classList.add('modal-open');
+        }
+        function closeSuspendModal() {
+            if (!suspendModal) return;
+            suspendModal.hidden = true;
+            document.body.classList.remove('modal-open');
+            if (suspendForm) suspendForm.reset();
+        }
+        document.querySelectorAll('.js-suspend-user-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                openSuspendModal(btn.getAttribute('data-user-id') || '', btn.getAttribute('data-user-name') || 'User');
+            });
+        });
+        document.querySelectorAll('[data-close-suspend-user]').forEach(function(btn) { btn.addEventListener('click', closeSuspendModal); });
+        if (suspendForm) {
+            suspendForm.addEventListener('submit', function(e) {
+                var value = parseInt((suspendDurationValue && suspendDurationValue.value) || '0', 10);
+                if (value < 1) {
+                    e.preventDefault();
+                    alert('Suspend duration must be at least 1.');
+                    return;
+                }
+                if (!suspendUserId || suspendUserId.value.trim() === '') {
+                    e.preventDefault();
+                    alert('No target user selected.');
+                }
+            });
+        }
     })();
     </script>
     <?php $notifJsVer = @filemtime(__DIR__ . '/super_admin_notifications.js') ?: time(); ?>

@@ -2,6 +2,7 @@
 session_start();
 
 $config = require __DIR__ . '/../config.php';
+require_once __DIR__ . '/../Super Admin Side/_activity_logger.php';
 $namespace = $config['database'] . '.' . ($config['collection'] ?? 'offices');
 
 $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
@@ -248,6 +249,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_office'])) {
         $_POST['description'] ?? ''
     );
     if ($result['success']) {
+        activityLog($config, 'office_add', [
+            'module' => 'admin_offices',
+            'office_code' => trim((string)($_POST['office_code'] ?? '')),
+            'office_name' => trim((string)($_POST['office_name'] ?? '')),
+        ]);
         header('Location: admin_offices.php?added=1');
         exit;
     }
@@ -264,6 +270,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_office'])) {
         $_POST['description'] ?? ''
     );
     if ($result['success']) {
+        activityLog($config, 'office_update', [
+            'module' => 'admin_offices',
+            'office_id' => trim((string)($_POST['office_id'] ?? '')),
+            'office_code' => trim((string)($_POST['office_code'] ?? '')),
+            'office_name' => trim((string)($_POST['office_name'] ?? '')),
+        ]);
         header('Location: admin_offices.php?edited=1');
         exit;
     }
@@ -273,6 +285,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_office'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_head'])) {
     $result = assignHead($config, $_POST['office_id'] ?? '', $_POST['office_head_id'] ?? '');
     if ($result['success']) {
+        activityLog($config, 'office_assign_head', [
+            'module' => 'admin_offices',
+            'office_id' => trim((string)($_POST['office_id'] ?? '')),
+            'office_head_id' => trim((string)($_POST['office_head_id'] ?? '')),
+        ]);
         header('Location: admin_offices.php?head_assigned=1');
         exit;
     }
@@ -284,6 +301,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['assign_head'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_office'])) {
     $result = deleteOffice($config, $_POST['office_id'] ?? '');
     if ($result['success']) {
+        activityLog($config, 'office_delete', [
+            'module' => 'admin_offices',
+            'office_id' => trim((string)($_POST['office_id'] ?? '')),
+        ]);
         header('Location: admin_offices.php?deleted=1');
         exit;
     }

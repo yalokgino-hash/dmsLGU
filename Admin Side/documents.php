@@ -9,6 +9,7 @@ if (!isset($_SESSION['user_id']) || !in_array($role, ['admin', 'staff', 'departm
 }
 
 $config = require __DIR__ . '/../config.php';
+require_once __DIR__ . '/../Super Admin Side/_activity_logger.php';
 $documentsNamespace = $config['database'] . '.documents';
 
 // View document (inline – open in browser/viewer); must run before any includes that could output
@@ -112,6 +113,12 @@ if (!empty($_GET['archive']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['archive']
             $deleteBulk = new MongoDB\Driver\BulkWrite;
             $deleteBulk->delete(['documentId' => $archiveId], ['limit' => 0]);
             $manager->executeBulkWrite($sentToAdminNamespace, $deleteBulk);
+            activityLog($config, 'document_archive', [
+                'module' => 'admin_documents',
+                'document_id' => $archiveId,
+                'document_code' => (string)$docCode,
+                'document_title' => (string)$docTitle,
+            ]);
         }
     } catch (Exception $e) {}
     header('Location: documents.php');
@@ -163,6 +170,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 }
                 if ($sentCount > 0) {
                     $manager->executeBulkWrite($sentNamespace, $bulk);
+                    activityLog($config, 'document_send_to_department_heads', [
+                        'module' => 'admin_documents',
+                        'document_id' => $docId,
+                        'target_count' => (string)$sentCount,
+                    ]);
                     header('Location: documents.php?sent_head=1&count=' . (int)$sentCount);
                     exit;
                 }
@@ -198,6 +210,12 @@ if (!empty($_GET['send']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['send'])) {
                 'sentByUserName' => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
             ]);
             $manager->executeBulkWrite($sentNamespace, $bulk);
+            activityLog($config, 'document_send_to_super_admin', [
+                'module' => 'admin_documents',
+                'document_id' => $sendId,
+                'document_code' => (string)$docCode,
+                'document_title' => (string)$docTitle,
+            ]);
         }
     } catch (Exception $e) {}
     header('Location: documents.php?sent=1');
@@ -250,6 +268,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         'userName'      => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
                     ]);
                     $manager->executeBulkWrite($historyNamespace, $historyBulk);
+                    activityLog($config, 'document_add', [
+                        'module' => 'admin_documents',
+                        'document_id' => (string)$newId,
+                        'document_code' => $documentCode,
+                        'document_title' => $documentTitle,
+                        'file_name' => (string)$fname,
+                    ]);
                     header('Location: documents.php?added=1');
                     exit;
 } catch (Exception $e) {
