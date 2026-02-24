@@ -303,11 +303,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
         .icon-btn { position: relative; width: 48px; height: 48px; }
         .icon-btn svg { width: 26px; height: 26px; }
         .notif-badge { position: absolute; top: 6px; right: 6px; background: #ef4444; color: white; font-size: 13px; padding: 4px 8px; border-radius: 999px; line-height: 1; }
-        .notif-dropdown, .profile-dropdown { position: absolute; right: 0; top: 54px; background: white; color: #0b1720; min-width: 240px; border-radius: 8px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 10px 0; }
-        .notif-item { padding: 12px 14px; font-size: 1.05rem; color: #475569; }
-        .notif-item-link { display: block; text-decoration: none; color: #1e293b; border-bottom: 1px solid #f1f5f9; }
-        .notif-item-link:hover { background: #f8fafc; color: #0f172a; }
-        .notif-item-link:last-child { border-bottom: none; }
+        .profile-dropdown { position: absolute; right: 0; top: 54px; background: white; color: #0b1720; min-width: 240px; border-radius: 8px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 10px 0; }
         .profile-link { display: flex; align-items: center; gap: 8px; padding: 10px 12px; text-decoration: none; color: #0b1720; }
         .profile-link svg { width: 16px; height: 16px; flex-shrink: 0; }
         .profile-link:hover { background: #f1f5f9; }
@@ -476,19 +472,7 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
                     <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
                         <button type="button" class="dept-add-btn" onclick="openAddModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>Add Department</button>
                         <div class="header-controls">
-                            <button class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
-                                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                                <span class="notif-badge" id="notif-count" aria-hidden="true" style="<?= $notifCount === 0 ? 'display:none' : '' ?>"><?= (int)$notifCount ?></span>
-                            </button>
-                            <div class="notif-dropdown" id="notif-dropdown" aria-hidden="true">
-                                <?php if (count($notifItems) === 0): ?>
-                                <div class="notif-item">No new notifications</div>
-                                <?php else: ?>
-                                <?php foreach ($notifItems as $ni): ?>
-                                <a href="documents.php?highlight=<?= urlencode($ni['documentId']) ?>" class="notif-item notif-item-link"><?= htmlspecialchars($ni['documentTitle']) ?> — from <?= htmlspecialchars($ni['sentByUserName']) ?> (<?= htmlspecialchars($ni['sentAtFormatted']) ?>)</a>
-                                <?php endforeach; ?>
-                                <?php endif; ?>
-                            </div>
+                            <?php include __DIR__ . '/_notif_dropdown_super_admin.php'; ?>
                         </div>
                     </div>
                 </div>
@@ -894,16 +878,9 @@ $userSignature = isset($_SESSION['user_signature']) ? $_SESSION['user_signature'
         <input type="hidden" name="office_id" id="delete-office-id">
     </form>
 <script src="sidebar_super_admin.js"></script>
-<script src="super_admin_notifications.js"></script>
+<?php $notifJsVer = @filemtime(__DIR__ . '/super_admin_notifications.js') ?: time(); ?>
+<script src="super_admin_notifications.js?v=<?= (int)$notifJsVer ?>"></script>
 <script>
-(function(){
-    var notifBtn = document.getElementById('notif-btn');
-    var notifDropdown = document.getElementById('notif-dropdown');
-    function closeNotif(){ if (notifDropdown) notifDropdown.style.display = 'none'; }
-    if (notifBtn) notifBtn.addEventListener('click', function(e){ e.stopPropagation(); if (!notifDropdown) return; var showing = notifDropdown.style.display === 'block'; closeNotif(); notifDropdown.style.display = showing ? 'none' : 'block'; });
-    document.addEventListener('click', function(){ closeNotif(); });
-    document.addEventListener('click', function(){ closeNotif(); });
-})();
 (function(){
     var profileOverlay = document.getElementById('profile-modal-overlay');
     var profileCloseBtn = document.getElementById('profile-modal-close');

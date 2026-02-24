@@ -61,11 +61,10 @@ function getUsersList($config, $search = '') {
  * Add a new user to the database.
  * @return array ['success' => bool, 'message' => string]
  */
-function addUser($config, $username, $name, $email, $password, $role, $department = '') {
+function addUser($config, $username, $name, $email, $password, $role) {
     $username = trim($username);
     $name = trim($name);
     $email = trim($email);
-    $department = trim($department);
     if ($username === '' || $email === '') {
         return ['success' => false, 'message' => 'Username and email are required.'];
     }
@@ -93,9 +92,6 @@ function addUser($config, $username, $name, $email, $password, $role, $departmen
             'role'      => $role,
             'created_at' => new MongoDB\BSON\UTCDateTime(),
         ];
-        if ($department !== '') {
-            $doc['department'] = $department;
-        }
         $bulk = new MongoDB\Driver\BulkWrite;
         $bulk->insert($doc);
         $manager->executeBulkWrite($namespace, $bulk);
@@ -119,8 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['name'] ?? '',
             $_POST['email'] ?? '',
             $_POST['password'] ?? '',
-            $_POST['role'] ?? 'user',
-            $_POST['department'] ?? ''
+            $_POST['role'] ?? 'user'
         );
         if ($flash) {
             header('Location: users.php?msg=' . urlencode($flash['message']) . '&ok=' . ($flash['success'] ? '1' : '0'));
@@ -135,6 +130,20 @@ if ($roleFilter !== '') {
         return strtolower(trim($u['role'] ?? '')) === strtolower($roleFilter);
     });
     $usersList = array_values($usersList);
+}
+
+function formatRoleLabel($role) {
+    $r = strtolower(trim($role ?? ''));
+    $labels = [
+        'superadmin' => 'Super Admin',
+        'admin' => 'Admin',
+        'user' => 'User',
+        'staff' => 'Staff',
+        'departmenthead' => 'Department Head',
+        'department_head' => 'Department Head',
+        'dept_head' => 'Department Head',
+    ];
+    return $labels[$r] ?? ucfirst($r) ?: '—';
 }
 
 ?>
@@ -164,17 +173,61 @@ if ($roleFilter !== '') {
         .icon-btn svg, .avatar-btn svg { width: 26px; height: 26px; }
         .notif-badge { position: absolute; top: 6px; right: 6px; background: #ef4444; color: white; font-size: 13px; padding: 4px 8px; border-radius: 999px; line-height: 1; }
         .avatar-btn { width: 48px; height: 48px; padding: 0; border-radius: 10px; }
-        .notif-dropdown { position: absolute; right: 0; top: 54px; background: white; color: #0b1720; min-width: 240px; border-radius: 8px; box-shadow: 0 8px 20px rgba(2,6,23,0.12); border: 1px solid #e6eef8; display: none; z-index: 1200; padding: 10px 0; }
-        .notif-item { padding: 12px 14px; font-size: 1.05rem; color: #475569; }
-        .notif-item-link { display: block; text-decoration: none; color: #1e293b; border-bottom: 1px solid #f1f5f9; }
-        .notif-item-link:hover { background: #f8fafc; color: #0f172a; }
-        .notif-item-link:last-child { border-bottom: none; }
         .main-content .admin-content-body { padding-top: 24px; }
         .offices-card .offices-tools.doc-filter-row select { height: 42px; border: 1px solid #e2e8f0; border-radius: 10px; padding: 0 12px; font-size: 14px; color: #1e293b; background: #fff; font-family: 'Poppins', sans-serif; }
         .users-toast { position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 1500; display: flex; align-items: center; gap: 12px; padding: 0.875rem 1rem; border-radius: 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.15); max-width: 360px; animation: users-toast-in 0.3s ease; }
         .users-toast.success { background: #22c55e; color: #fff; }
         .users-toast.error { background: #ef4444; color: #fff; }
         @keyframes users-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        /* Users table UX */
+        .offices-card .offices-table-frame { border-radius: 12px; overflow: hidden; }
+        .offices-card .offices-table thead th { background: #f8fafc; font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; padding: 14px 16px; border-bottom: 2px solid #e2e8f0; }
+        .offices-card .offices-table tbody td { padding: 14px 16px; vertical-align: middle; border-bottom: 1px solid #f1f5f9; }
+        .offices-card .offices-table tbody tr:hover { background: #f8fafc; }
+        .offices-card .offices-table tbody tr:last-child td { border-bottom: none; }
+        .users-role-badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 500; }
+        .users-role-badge.superadmin { background: #fef3c7; color: #92400e; }
+        .users-role-badge.admin { background: #dbeafe; color: #1e40af; }
+        .users-role-badge.departmenthead, .users-role-badge.department_head, .users-role-badge.dept_head { background: #e0e7ff; color: #3730a3; }
+        .users-role-badge.user, .users-role-badge.staff { background: #f1f5f9; color: #475569; }
+        .users-action-cell { white-space: nowrap; }
+        .users-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; font-size: 0.85rem; font-weight: 500; text-decoration: none; color: #475569; background: #f1f5f9; border: 1px solid #e2e8f0; cursor: pointer; transition: background 0.2s, color 0.2s; font-family: inherit; }
+        .users-action-btn:hover { background: #e2e8f0; color: #1e293b; }
+        .users-action-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
+        .offices-empty { padding: 2rem; text-align: center; color: #64748b; font-size: 0.95rem; }
+        #add-user-modal .doc-modal-dialog { width: min(560px, calc(100vw - 24px)); border-radius: 14px; overflow: hidden; }
+        #add-user-modal .doc-modal-header { padding: 16px 18px; border-bottom: 1px solid #e2e8f0; background: #ffffff; }
+        #add-user-modal .doc-modal-header h2 { margin: 0; font-size: 1.3rem; color: #1e293b; }
+        #add-user-modal .doc-modal-form { padding: 16px 18px 18px; display: grid; gap: 12px; }
+        #add-user-modal .doc-form-field { display: grid; gap: 6px; }
+        #add-user-modal .doc-form-field label { font-size: 13px; color: #334155; font-weight: 600; }
+        #add-user-modal .doc-form-field input,
+        #add-user-modal .doc-form-field select {
+            width: 100%;
+            height: 40px;
+            border: 1px solid #dbe2ea;
+            border-radius: 10px;
+            padding: 0 12px;
+            font-size: 14px;
+            font-family: 'Poppins', sans-serif;
+            color: #0f172a;
+            background: #fff;
+            box-sizing: border-box;
+        }
+        #add-user-modal .doc-form-field input:focus,
+        #add-user-modal .doc-form-field select:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+        }
+        #add-user-modal .doc-modal-actions { margin-top: 6px; display: flex; justify-content: flex-end; gap: 10px; }
+        #add-user-modal .doc-btn { min-height: 38px; padding: 0 14px; border-radius: 10px; font-weight: 600; }
+        #add-user-modal .doc-form-error { margin: 0; font-size: 13px; color: #dc2626; }
+        @media (max-width: 640px) {
+            #add-user-modal .doc-modal-dialog { width: calc(100vw - 16px); }
+            #add-user-modal .doc-modal-form { padding: 14px; gap: 10px; }
+            #add-user-modal .doc-modal-actions { gap: 8px; }
+        }
     </style>
 </head>
 <body>
@@ -190,24 +243,7 @@ if ($roleFilter !== '') {
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <div class="header-controls">
-                            <button class="icon-btn" id="notif-btn" aria-label="Notifications" title="Notifications">
-                                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                                <span class="notif-badge" id="notif-count" aria-hidden="true" style="<?= $notifCount === 0 ? 'display:none' : '' ?>"><?= (int)$notifCount ?></span>
-                            </button>
-                            <div class="notif-dropdown" id="notif-dropdown" aria-hidden="true">
-                                <?php if (count($notifItems) === 0): ?>
-                                <div class="notif-item">No new notifications</div>
-                                <?php else: ?>
-                                <?php foreach ($notifItems as $ni): ?>
-                                <a href="documents.php?highlight=<?= urlencode($ni['documentId']) ?>" class="notif-item notif-item-link"><?= htmlspecialchars($ni['documentTitle']) ?> — from <?= htmlspecialchars($ni['sentByUserName']) ?> (<?= htmlspecialchars($ni['sentAtFormatted']) ?>)</a>
-                                <?php endforeach; ?>
-                                <?php endif; ?>
-                            </div>
-                        </div>
-                        <div class="header-controls">
-                            <button class="avatar-btn" id="profile-btn" aria-label="Profile" title="Profile">
-                                <svg class="avatar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4z"/><path d="M6 20v-1c0-2.21 3.58-4 6-4s6 1.79 6 4v1"/></svg>
-                            </button>
+                            <?php include __DIR__ . '/_notif_dropdown_super_admin.php'; ?>
                         </div>
                     </div>
                 </div>
@@ -239,38 +275,47 @@ if ($roleFilter !== '') {
                             <svg class="offices-btn-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                             Edit
                         </button>
-                    </div>
+                    </form>
 
                     <div class="offices-table-frame">
                         <table class="offices-table">
                             <thead>
                                 <tr>
-                                    <th>NO.</th>
-                                    <th>NAME</th>
-                                    <th>EMAIL</th>
-                                    <th>OFFICE/DEPARTMENT</th>
-                                    <th>ACTION</th>
+                                    <th>No.</th>
+                                    <th>Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Office / Department</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody id="users-table-body">
                                 <?php if (count($usersList) === 0): ?>
                                 <tr>
-                                    <td colspan="5" class="offices-empty" id="no-users-row">No users yet.</td>
+                                    <td colspan="6" class="offices-empty" id="no-users-row">No users found. Try adjusting the search or filter, or add a new user.</td>
                                 </tr>
                                 <?php else:
                                     $no = 1;
                                     foreach ($usersList as $u):
-                                        $displayName = trim($u['username'] ?? '') !== '' ? trim($u['username']) : (trim($u['name'] ?? '') ?: trim($u['email'] ?? ''));
+                                        $displayName = trim($u['name'] ?? '') ?: (trim($u['username'] ?? '') ?: trim($u['email'] ?? ''));
                                         if ($displayName === '') $displayName = '—';
                                         $dept = trim($u['department'] ?? $u['user_department'] ?? '');
                                         if ($dept === '') $dept = '—';
+                                        $rawRole = strtolower(trim($u['role'] ?? ''));
+                                        $roleClass = $rawRole ?: 'user';
                                 ?>
                                 <tr>
                                     <td><?= (int)$no ?></td>
                                     <td><?= htmlspecialchars($displayName) ?></td>
                                     <td><?= htmlspecialchars(trim($u['email'] ?? '') ?: '—') ?></td>
+                                    <td><span class="users-role-badge <?= htmlspecialchars($roleClass) ?>"><?= htmlspecialchars(formatRoleLabel($u['role'] ?? '')) ?></span></td>
                                     <td><?= htmlspecialchars($dept) ?></td>
-                                    <td>—</td>
+                                    <td class="users-action-cell">
+                                        <a href="edit_user.php?id=<?= htmlspecialchars($u['_id'] ?? '') ?>" class="users-action-btn" title="Edit user">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                            Edit
+                                        </a>
+                                    </td>
                                 </tr>
                                 <?php
                                     $no++;
@@ -314,17 +359,13 @@ if ($roleFilter !== '') {
                 </div>
                 <div class="doc-form-field">
                     <label for="add-user-role">Role</label>
-                    <select id="add-user-role" name="role" class="offices-select" style="height:40px;border:1px solid #e2e8f0;border-radius:10px;padding:0 10px;font-size:14px;">
+                    <select id="add-user-role" name="role" class="offices-select">
                         <option value="user">User</option>
                         <option value="admin">Admin</option>
                         <option value="superadmin">Super Admin</option>
                         <option value="staff">Staff</option>
                         <option value="departmenthead">Department Head</option>
                     </select>
-                </div>
-                <div class="doc-form-field">
-                    <label for="add-user-department">Office / Department</label>
-                    <input type="text" id="add-user-department" name="department" placeholder="Optional">
                 </div>
                 <p class="doc-form-error" id="add-user-form-error" hidden></p>
                 <div class="doc-modal-actions">
@@ -366,16 +407,8 @@ if ($roleFilter !== '') {
         if (editBtn) editBtn.addEventListener('click', function() { alert('Select a user row to edit.'); });
     })();
     </script>
-    <script>
-    (function(){
-        var notifBtn = document.getElementById('notif-btn');
-        var notifDropdown = document.getElementById('notif-dropdown');
-        function closeNotif(){ if (notifDropdown) notifDropdown.style.display = 'none'; }
-        if (notifBtn) notifBtn.addEventListener('click', function(e){ e.stopPropagation(); if (!notifDropdown) return; var showing = notifDropdown.style.display === 'block'; closeNotif(); notifDropdown.style.display = showing ? 'none' : 'block'; });
-        document.addEventListener('click', function(){ closeNotif(); });
-    })();
-    </script>
+    <?php $notifJsVer = @filemtime(__DIR__ . '/super_admin_notifications.js') ?: time(); ?>
     <script src="sidebar_super_admin.js"></script>
-    <script src="super_admin_notifications.js"></script>
+    <script src="super_admin_notifications.js?v=<?= (int)$notifJsVer ?>"></script>
 </body>
 </html>

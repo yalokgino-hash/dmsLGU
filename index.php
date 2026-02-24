@@ -50,6 +50,19 @@ if (!class_exists('MongoDB\Driver\Manager')) {
 $config = require __DIR__ . '/config.php';
 $error = '';
 $success = '';
+if (isset($_GET['error'])) {
+    $errMap = [
+        'google_not_configured'   => 'Sign in with Google is not configured. Add Google Client ID and Secret in config.',
+        'google_token_failed'    => 'Google sign-in failed. Please try again.',
+        'google_userinfo_failed' => 'Could not get your Google profile. Please try again.',
+        'google_no_email'        => 'Your Google account did not provide an email.',
+        'google_not_authorized'  => 'This email is not authorized. Your account must exist in the system. Contact your administrator.',
+        'google_otp_send_failed' => 'Google sign-in was verified, but we could not send your OTP email. Please check mail settings and try again.',
+        'google_create_failed'   => 'Could not create your account. Please try again.',
+        'google_login_failed'    => 'Login failed. Please try again.',
+    ];
+    $error = $errMap[$_GET['error']] ?? 'An error occurred. Please try again.';
+}
 $emailError = false;
 $passwordError = false;
 $adminError = '';
@@ -477,6 +490,16 @@ nav a:hover{
     font-size:15px;
 }
 
+.hero-login-wrap{
+    display:flex;
+    justify-content:flex-end;
+    align-items:center;
+}
+.hero-login-wrap .login-card{
+    margin:0;
+    margin-left:auto;
+}
+
 .login-card{
     position:relative;
     background:rgba(255,255,255,0.06);
@@ -595,7 +618,7 @@ nav a:hover{
     color:#9ec6ef;
 }
 
-#login-modal .login-divider{
+.login-card .login-divider{
     display:flex;
     justify-content:center;
     align-items:center;
@@ -606,14 +629,14 @@ nav a:hover{
     text-align:center;
 }
 
-#login-modal .btn-google{
+.login-card .btn-google{
     display:flex;
     align-items:center;
     justify-content:center;
     gap:10px;
     width:100%;
     padding:12px 14px;
-    margin-top:0;
+    margin-top:12px;
     background:#fff;
     color:#3c4043;
     border:1px solid #dadce0;
@@ -623,7 +646,6 @@ nav a:hover{
     font-weight:500;
     cursor:pointer;
     transition:background 0.2s, box-shadow 0.2s;
-    margin-top:0;
 }
 .btn-google:hover{
     background:#f8f9fa;
@@ -769,6 +791,12 @@ footer{
         max-width:400px;
         margin:0 auto;
     }
+    .hero-login-wrap{
+        justify-content:center;
+    }
+    .hero-login-wrap .login-card{
+        margin-left:0;
+    }
     .hero-text h1{ font-size:36px; }
     .hero-text p{ font-size:15px; max-width:100%; }
 }
@@ -790,12 +818,6 @@ footer{
         <a href="#">Features</a>
         <a href="#">Departments</a>
         <a href="#">About</a>
-        <?php if ($isLoggedIn): ?>
-            <a href="#" class="nav-btn"><?= htmlspecialchars($_SESSION['user_name']) ?></a>
-            <a href="?logout=1" class="nav-btn">Logout</a>
-        <?php else: ?>
-            <a href="#" class="nav-btn" onclick="openLoginModal(); return false;"> Login</a>
-        <?php endif; ?>
     </nav>
 </header>
 
@@ -815,13 +837,15 @@ footer{
     </div>
 
     <?php if (!$isLoggedIn): ?>
-    <!-- Login Modal -->
-    <div id="login-modal" class="modal" style="display: none;">
-        <div class="modal-overlay"></div>
-        <div class="modal-content">
+    <!-- Login fixed to the right -->
+    <div class="hero-login-wrap">
             <div class="login-card">
-                <button type="button" class="modal-close" onclick="closeLoginModal();" aria-label="Close">&times;</button>
                 <h3>Login</h3>
+                <?php if ($error): ?>
+                    <div class="field-error-slot" style="margin-bottom: 1rem;">
+                        <span class="field-error"><?= htmlspecialchars($error) ?></span>
+                    </div>
+                <?php endif; ?>
                 <form method="post">
                     <div class="field-group">
                         <label>Email</label>
@@ -849,7 +873,7 @@ footer{
 
                     <div class="login-divider">Or</div>
 
-                    <button type="button" class="btn-google" title="Sign in with Google" data-google-login-url="<?= htmlspecialchars($config['google_login_url'] ?? 'auth-google.php') ?>">
+                    <button type="button" class="btn-google" title="Sign in with Google" data-google-login-url="Auth/auth-google.php">
                         <svg class="google-icon" viewBox="0 0 24 24" width="20" height="20">
                             <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
                             <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
@@ -866,13 +890,14 @@ footer{
                 <?php endif; ?>
                 <div class="hint">Authorized personnel access only</div>
             </div>
-        </div>
     </div>
     <?php else: ?>
-    <div class="login-card" style="background: #dcfce7; padding: 2rem; text-align: center;">
-        <h3 style="color: #166534; margin-bottom: 1rem;">Welcome, <?= htmlspecialchars($_SESSION['user_name']) ?>!</h3>
-        <p style="color: #166534; margin-bottom: 1.5rem;">You are successfully logged in.</p>
-        <a href="?logout=1" style="display: inline-block; padding: 0.75rem 1.5rem; background: #2563eb; color: white; text-decoration: none; border-radius: 6px;">Logout</a>
+    <div class="hero-login-wrap">
+        <div class="login-card" style="background: #dcfce7; padding: 2rem; text-align: center;">
+            <h3 style="color: #166534; margin-bottom: 1rem;">Welcome, <?= htmlspecialchars($_SESSION['user_name']) ?>!</h3>
+            <p style="color: #166534; margin-bottom: 1.5rem;">You are successfully logged in.</p>
+            <a href="?logout=1" style="display: inline-block; padding: 0.75rem 1.5rem; background: #2563eb; color: white; text-decoration: none; border-radius: 6px;">Logout</a>
+        </div>
     </div>
     <?php endif; ?>
 
@@ -919,16 +944,9 @@ footer{
 </footer>
 
 <script>
-function openLoginModal() {
-    var modal = document.getElementById('login-modal');
-    if (modal) {
-        modal.style.display = 'flex';
-    }
-}
-
 document.querySelectorAll('.btn-google').forEach(function(btn) {
     btn.addEventListener('click', function() {
-        var url = this.getAttribute('data-google-login-url') || 'auth-google.php';
+        var url = this.getAttribute('data-google-login-url') || 'Auth/auth-google.php';
         if (url) window.location.href = url;
     });
 });
@@ -954,37 +972,9 @@ function togglePassword(btn) {
     }
 }
 
-function closeLoginModal() {
-    var modal = document.getElementById('login-modal');
-    if (modal) {
-        modal.style.display = 'none';
-        var form = modal.querySelector('form');
-        if (form) {
-            var emailInput = form.querySelector('input[name="email"]');
-            var passwordInput = form.querySelector('input[name="password"]');
-            if (emailInput) { emailInput.value = ''; emailInput.classList.remove('input-error'); }
-            if (passwordInput) {
-                passwordInput.value = '';
-                passwordInput.classList.remove('input-error');
-                passwordInput.type = 'password';
-                var wrap = passwordInput.closest('.password-wrap');
-                if (wrap) {
-                    var eye = wrap.querySelector('.icon-eye');
-                    var eyeOff = wrap.querySelector('.icon-eye-off');
-                    if (eye) eye.style.display = 'block';
-                    if (eyeOff) eyeOff.style.display = 'none';
-                    var toggle = wrap.querySelector('.password-toggle');
-                    if (toggle) toggle.style.display = 'none';
-                }
-            }
-            form.querySelectorAll('.field-error').forEach(function(el) { el.style.display = 'none'; });
-        }
-    }
-}
-
 // Show the password-eye toggle only when the user types something into the password field.
 (function() {
-    var modalForm = document.querySelector('#login-modal form');
+    var modalForm = document.querySelector('.hero-login-wrap form');
     if (!modalForm) return;
     var passwordInput = modalForm.querySelector('input[name="password"]');
     if (!passwordInput) return;
@@ -1019,17 +1009,11 @@ function closeLoginModal() {
 })();
 
 <?php if ($error): ?>
-openLoginModal();
-setTimeout(function () {
-    var form = document.querySelector('#login-modal form');
-    if (form) {
-        var emailInput = form.querySelector('input[name="email"]');
-        var passwordInput = form.querySelector('input[name="password"]');
-        if (emailInput) emailInput.classList.remove('input-error');
-        if (passwordInput) passwordInput.classList.remove('input-error');
-        form.querySelectorAll('.field-error').forEach(function(el) { el.style.display = 'none'; });
-    }
-}, 3000);
+// Scroll login card into view when there is an error (form is already visible on the right)
+document.addEventListener('DOMContentLoaded', function() {
+    var wrap = document.querySelector('.hero-login-wrap');
+    if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+});
 <?php endif; ?>
 </script>
 

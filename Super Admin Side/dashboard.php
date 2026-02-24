@@ -16,6 +16,11 @@ $userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
 $sidebar_active = 'dashboard';
 // Welcome header uses username from DB (stays in sync when updated in database)
 $welcomeUsername = getUserUsername($_SESSION['user_id'] ?? '') ?: ($_SESSION['user_username'] ?? $userName) ?: 'User';
+$config = require dirname(__DIR__) . '/config.php';
+require_once __DIR__ . '/_notifications_super_admin.php';
+$notifData = getSuperAdminNotifications($config);
+$notifCount = $notifData['count'];
+$notifItems = $notifData['items'];
 
 // Fetch document counts and recent docs (same logic as Admin dashboard)
 $totalDocuments = 0;
@@ -25,7 +30,6 @@ $completedCount = 0;
 $recentDocuments = [];
 $statusBreakdown = ['Archived' => 0, 'Pending Admin' => 0, 'Pending Department' => 0];
 try {
-    $config = require dirname(__DIR__) . '/config.php';
     $manager = new MongoDB\Driver\Manager($config['uri']);
     $namespace = $config['database'] . '.documents';
     $query = new MongoDB\Driver\Query([], ['sort' => ['createdAt' => -1], 'limit' => 200]);
@@ -80,6 +84,35 @@ try {
         .main-content .admin-content-header-row { flex-shrink: 0; }
         .main-content .admin-content-body { flex: 1; min-height: 0; overflow: auto; padding: 32px 35px; }
         .main-content .profile-dropdown[hidden] { display: none !important; }
+        .main-content .admin-content-header-row { padding-right: 35.2px; }
+        .main-content .admin-content-actions { margin-left: auto; }
+        .admin-content-actions .header-controls { position: relative; }
+        .admin-content-actions .icon-btn {
+            background: #f1f5f9;
+            border: none;
+            color: #475569;
+            padding: 0;
+            border-radius: 10px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+        }
+        .admin-content-actions .icon-btn:hover { background: #e2e8f0; color: #1e293b; }
+        .admin-content-actions .icon-btn svg { width: 22px; height: 22px; }
+        .admin-content-actions .notif-badge {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            background: #ef4444;
+            color: #fff;
+            font-size: 12px;
+            line-height: 1;
+            padding: 4px 7px;
+            border-radius: 999px;
+        }
     </style>
 </head>
 <body>
@@ -96,17 +129,8 @@ try {
                         </div>
                     </header>
                     <div class="admin-content-actions">
-                        <button type="button" class="admin-icon-btn" id="notif-btn" title="Notifications" aria-label="Notifications">
-                            <svg class="icon-bell" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-                        </button>
-                        <div class="admin-profile-wrap">
-                            <button type="button" class="admin-icon-btn" id="profile-logout-btn" title="Profile and log out" aria-haspopup="true" aria-expanded="false" aria-label="Profile">
-                                <svg class="icon-person" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 0 0-16 0"/></svg>
-                            </button>
-                            <div class="profile-dropdown" id="profile-dropdown" hidden>
-                                <a href="#" class="dropdown-item" id="header-profile-link">Profile</a>
-                                <a href="../index.php?logout=1" class="dropdown-item dropdown-logout">Log out</a>
-                            </div>
+                        <div class="header-controls">
+                            <?php include __DIR__ . '/_notif_dropdown_super_admin.php'; ?>
                         </div>
                     </div>
                 </div>
@@ -220,6 +244,8 @@ try {
 
     <?php include __DIR__ . '/_profile_modal_super_admin.php'; ?>
     <script src="sidebar_super_admin.js"></script>
+    <?php $notifJsVer = @filemtime(__DIR__ . '/super_admin_notifications.js') ?: time(); ?>
+    <script src="super_admin_notifications.js?v=<?= (int)$notifJsVer ?>"></script>
     <script>
     (function() {
         function updateSubtitle() {
