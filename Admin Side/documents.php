@@ -1,9 +1,65 @@
 <?php
 session_start();
+ob_start();
 
 $role = $_SESSION['user_role'] ?? '';
 if (!isset($_SESSION['user_id']) || !in_array($role, ['admin', 'staff', 'departmenthead', 'department_head', 'dept_head'])) {
     header('Location: ../index.php');
+    exit;
+}
+
+$config = require __DIR__ . '/../config.php';
+$documentsNamespace = $config['database'] . '.documents';
+
+// View document (inline – open in browser/viewer); must run before any includes that could output
+if (!empty($_GET['view']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['view'])) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($_GET['view'])]);
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        if (count($docs) > 0) {
+            $doc = (array)$docs[0];
+            $fileName = $doc['fileName'] ?? $doc['file_name'] ?? 'document.docx';
+            $fileContent = $doc['fileContent'] ?? $doc['file_content'] ?? '';
+            if ($fileContent !== '') {
+                if (ob_get_level()) ob_end_clean();
+                header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+                header('Content-Disposition: inline; filename="' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName) . '"');
+                $decoded = base64_decode($fileContent, true);
+                echo ($decoded !== false) ? $decoded : $fileContent;
+                exit;
+            }
+        }
+    } catch (Exception $e) {}
+    if (ob_get_level()) ob_end_clean();
+    header('HTTP/1.1 404 Not Found');
+    exit;
+}
+
+// Download document (attachment); must run before any includes that could output
+if (!empty($_GET['download']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['download'])) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($_GET['download'])]);
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        if (count($docs) > 0) {
+            $doc = (array)$docs[0];
+            $fileName = $doc['fileName'] ?? $doc['file_name'] ?? 'document.docx';
+            $fileContent = $doc['fileContent'] ?? $doc['file_content'] ?? '';
+            if ($fileContent !== '') {
+                if (ob_get_level()) ob_end_clean();
+                header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+                header('Content-Disposition: attachment; filename="' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName) . '"');
+                $decoded = base64_decode($fileContent, true);
+                echo ($decoded !== false) ? $decoded : $fileContent;
+                exit;
+            }
+        }
+    } catch (Exception $e) {}
+    if (ob_get_level()) ob_end_clean();
+    header('HTTP/1.1 404 Not Found');
     exit;
 }
 
@@ -13,61 +69,12 @@ $userRole = $_SESSION['user_role'] ?? 'Admin';
 $userDepartment = $_SESSION['user_department'] ?? 'Not Assigned';
 $userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
 $sidebar_active = 'documents';
-
-if (!function_exists('getUserPhoto')) require_once __DIR__ . '/../Super Admin Side/_account_helpers.php';
-if (function_exists('getUserPhoto') && !empty($_SESSION['user_id'])) { $fp = getUserPhoto($_SESSION['user_id']); if ($fp !== '') $_SESSION['user_photo'] = $fp; }
-
-$config = require __DIR__ . '/../config.php';
-$documentsNamespace = $config['database'] . '.documents';
 $documentsList = [];
 $addMessage = null;
 $addError = null;
 
-// View document (inline – open in browser/viewer, do not download)
-if (!empty($_GET['view']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['view'])) {
-    try {
-        $manager = new MongoDB\Driver\Manager($config['uri']);
-        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($_GET['view'])]);
-        $cursor = $manager->executeQuery($documentsNamespace, $query);
-        $docs = $cursor->toArray();
-        if (count($docs) > 0) {
-            $doc = (array)$docs[0];
-            $fileName = $doc['fileName'] ?? 'document.docx';
-            $fileContent = $doc['fileContent'] ?? '';
-            if ($fileContent !== '') {
-                header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-                header('Content-Disposition: inline; filename="' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName) . '"');
-                echo base64_decode($fileContent, true) ?: $fileContent;
-                exit;
-            }
-        }
-    } catch (Exception $e) {}
-    header('HTTP/1.1 404 Not Found');
-    exit;
-}
-
-// Download document file (attachment)
-if (!empty($_GET['download']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['download'])) {
-    try {
-        $manager = new MongoDB\Driver\Manager($config['uri']);
-        $query = new MongoDB\Driver\Query(['_id' => new MongoDB\BSON\ObjectId($_GET['download'])]);
-        $cursor = $manager->executeQuery($documentsNamespace, $query);
-        $docs = $cursor->toArray();
-        if (count($docs) > 0) {
-            $doc = (array)$docs[0];
-            $fileName = $doc['fileName'] ?? 'document.docx';
-            $fileContent = $doc['fileContent'] ?? '';
-            if ($fileContent !== '') {
-                header('Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document');
-                header('Content-Disposition: attachment; filename="' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName) . '"');
-                echo base64_decode($fileContent, true) ?: $fileContent;
-                exit;
-            }
-        }
-    } catch (Exception $e) {}
-    header('HTTP/1.1 404 Not Found');
-    exit;
-}
+if (!function_exists('getUserPhoto')) require_once __DIR__ . '/../Super Admin Side/_account_helpers.php';
+if (function_exists('getUserPhoto') && !empty($_SESSION['user_id'])) { $fp = getUserPhoto($_SESSION['user_id']); if ($fp !== '') $_SESSION['user_photo'] = $fp; }
 
 // Archive document and log to document history
 if (!empty($_GET['archive']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['archive'])) {
@@ -297,26 +304,38 @@ try {
     $departmentHeadsList = [];
 }
 
-// Merge in documents sent from Super Admin: show them in the same Documents table
+// Merge in documents sent from Super Admin: show them in the same Documents table and mark as "Received"
 $sentToAdminNamespace = $config['database'] . '.sent_to_admin';
 $idsInList = array_column($documentsList, '_id');
 $idsInList = array_flip(array_filter($idsInList));
+$sentFromSuperAdminIds = [];
 try {
     $query = new MongoDB\Driver\Query([], ['sort' => ['sentAt' => -1], 'limit' => 500]);
     $cursor = $manager->executeQuery($sentToAdminNamespace, $query);
     foreach ($cursor as $row) {
         $arr = (array)$row;
         $docId = (string)($arr['documentId'] ?? '');
-        if ($docId === '' || isset($idsInList[$docId])) continue;
+        if ($docId === '') continue;
+        $sentFromSuperAdminIds[$docId] = true;
+        if (isset($idsInList[$docId])) continue;
         $idsInList[$docId] = true;
         $documentsList[] = [
             '_id'            => $docId,
             'documentCode'  => $arr['documentCode'] ?? $arr['document_code'] ?? '—',
             'documentTitle' => $arr['documentTitle'] ?? $arr['document_title'] ?? '—',
             'fileName'       => $arr['fileName'] ?? $arr['file_name'] ?? 'document.docx',
+            'status'        => 'received',
         ];
     }
 } catch (Exception $e) {}
+// Mark documents already in the list that were sent from Super Admin with status "Received"
+foreach ($documentsList as &$doc) {
+    $id = (string)($doc['_id'] ?? '');
+    if ($id !== '' && isset($sentFromSuperAdminIds[$id])) {
+        $doc['status'] = 'received';
+    }
+}
+unset($doc);
 
 $added = isset($_GET['added']) && $_GET['added'] === '1';
 $sent = isset($_GET['sent']) && $_GET['sent'] === '1';
@@ -421,26 +440,51 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
     .documents-action-send:hover { background: #a7f3d0; color: #047857; }
     .documents-action-send-super { background: #dbeafe; color: #1d4ed8; text-decoration: none; }
     .documents-action-send-super:hover { background: #bfdbfe; color: #1d4ed8; }
-    #send-document-modal .doc-modal-dialog { max-width: 440px; }
-    .send-modal-subtitle { margin: 0 0 1rem 0; font-size: 0.9rem; color: #64748b; line-height: 1.45; }
-    .send-heads-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem; }
-    .send-heads-toolbar-links { display: flex; gap: 12px; font-size: 13px; }
-    .send-heads-toolbar-links button { background: none; border: none; color: #3B82F6; cursor: pointer; padding: 0; font-family: inherit; font-size: inherit; font-weight: 500; }
-    .send-heads-toolbar-links button:hover { text-decoration: underline; color: #2563eb; }
-    .send-heads-toolbar-count { font-size: 13px; color: #64748b; font-weight: 500; }
-    .send-heads-list { max-height: 320px; overflow-y: auto; padding-right: 4px; }
+    .documents-send-wrap { position: relative; display: inline-block; }
+    .documents-send-trigger { text-decoration: underline; }
+    .documents-send-trigger:hover { text-decoration: underline; }
+    .documents-send-dropdown { position: fixed; min-width: 200px; background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 8px 20px rgba(0,0,0,0.12); padding: 6px 0; z-index: 1600; display: none; }
+    .documents-send-dropdown.show { display: block; }
+    .documents-send-dropdown-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px; border: none; background: none; color: #1e293b; font-size: 13px; font-weight: 500; cursor: pointer; text-align: left; text-decoration: none; font-family: inherit; box-sizing: border-box; transition: background 0.15s; }
+    .documents-send-dropdown-item:hover { background: #f1f5f9; }
+    .documents-send-dropdown-item svg { width: 16px; height: 16px; flex-shrink: 0; }
+    /* Send to Heads modal – match system design (doc-modal, admin-offices.css) */
+    #send-document-modal .doc-modal-dialog { max-width: 480px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04); }
+    #send-document-modal .doc-modal-header { padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    #send-document-modal .doc-modal-header h2 { font-size: 1.35rem; font-weight: 700; color: #1e293b; }
+    #send-document-modal .doc-modal-close { color: #475569; }
+    #send-document-modal .doc-modal-close:hover { color: #1e293b; }
+    .send-modal-subtitle { margin: 0; padding: 16px 18px 12px 18px; font-size: 14px; color: #64748b; line-height: 1.5; border-bottom: 1px solid #f1f5f9; }
+    #send-document-modal .doc-modal-form { padding: 16px 18px 18px; gap: 12px; }
+    .send-heads-toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .send-heads-toolbar-links { display: flex; gap: 12px; font-size: 14px; }
+    .send-heads-toolbar-links button { background: none; border: none; color: #2563eb; cursor: pointer; padding: 0; font-family: inherit; font-size: inherit; font-weight: 600; }
+    .send-heads-toolbar-links button:hover { color: #1d4ed8; text-decoration: underline; }
+    .send-heads-toolbar-count { font-size: 14px; color: #475569; font-weight: 500; }
+    .send-heads-list { max-height: 280px; overflow-y: auto; padding-right: 4px; }
     .send-heads-list::-webkit-scrollbar { width: 6px; }
     .send-heads-list::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 3px; }
     .send-heads-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-    .send-head-row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1.5px solid #e2e8f0; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: background 0.2s, border-color 0.2s, box-shadow 0.2s; }
+    .send-head-row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: background 0.2s, border-color 0.2s, box-shadow 0.2s; background: #fff; }
     .send-head-row:hover { background: #f8fafc; border-color: #cbd5e1; }
-    .send-head-row.selected { background: #ecfdf5; border-color: #10b981; box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.2); }
-    .send-head-row input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: #10b981; cursor: pointer; }
+    .send-head-row.selected { background: #eff6ff; border-color: #2563eb; box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.2); }
+    .send-head-row input[type="checkbox"] { width: 18px; height: 18px; flex-shrink: 0; accent-color: #2563eb; cursor: pointer; }
     .send-head-row-content { flex: 1; min-width: 0; }
-    .send-head-office { display: block; font-weight: 600; color: #1e293b; font-size: 0.95rem; margin-bottom: 2px; }
-    .send-head-name { display: block; color: #64748b; font-size: 0.875rem; }
-    .send-modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; }
-    .send-modal-actions .doc-btn-save { min-width: 120px; }
+    .send-head-office { display: block; font-weight: 600; color: #1e293b; font-size: 14px; margin-bottom: 2px; }
+    .send-head-name { display: block; color: #64748b; font-size: 13px; }
+    .send-modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 4px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+    .send-modal-actions .doc-btn { height: 38px; border-radius: 10px; font-size: 14px; font-weight: 600; }
+    .send-modal-actions .doc-btn-save { min-width: 100px; background: #2563eb; color: #fff; }
+    .send-modal-actions .doc-btn-save:hover { background: #1d4ed8; color: #fff; }
+    .send-modal-actions .doc-btn-save:disabled { background: #94a3b8; color: #fff; cursor: not-allowed; }
+    #send-document-modal .documents-empty { font-size: 14px; color: #64748b; }
+    .doc-modal-dialog-view { max-width: 90%; width: 900px; max-height: 90vh; display: flex; flex-direction: column; }
+    .document-view-body { flex: 1; min-height: 0; overflow: auto; padding: 1rem; background: #f8fafc; border-top: 1px solid #e2e8f0; }
+    .document-view-container { overflow: auto; max-height: 65vh; padding: 1rem; background: #fff; border-radius: 8px; }
+    .document-view-loading, .document-view-error { padding: 2rem; text-align: center; color: #64748b; }
+    .document-view-error { color: #dc2626; }
+    .doc-modal-footer { flex-shrink: 0; padding: 1rem 1.5rem; border-top: 1px solid #e2e8f0; gap: 10px; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+    .doc-modal-footer a.documents-action-btn { text-decoration: none; }
     @media (max-width: 980px) { .documents-tools { grid-template-columns: 1fr 1fr; } }
     </style>
 </head>
@@ -553,13 +597,18 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                                     <td><?php echo (int)($idx + 1); ?></td>
                                     <td><?php echo $docCode; ?></td>
                                     <td><?php echo $docTitle; ?></td>
-                                    <td><a href="documents.php?download=<?php echo urlencode($docId); ?>" class="doc-file-link"><?php echo $docFileName; ?></a></td>
+                                    <td><a href="documents.php?view=<?php echo urlencode($docId); ?>" class="doc-file-link document-view-trigger" data-doc-id="<?php echo htmlspecialchars($docId); ?>" data-doc-name="<?php echo htmlspecialchars($docFileName); ?>"><?php echo $docFileName; ?></a></td>
                                     <td><span class="document-status document-status-<?php echo strtolower(htmlspecialchars($docStatus)); ?>"><?php echo htmlspecialchars($docStatus); ?></span></td>
                                     <td>
                                         <div class="documents-actions-row">
-                                            <a href="documents.php?download=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-open" title="Download document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
-                                            <a href="documents.php?send=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-send-super" title="Send to Super Admin" onclick="return confirm('Send this document to Super Admin?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Super Admin</a>
-                                            <button type="button" class="documents-action-btn documents-action-send" data-document-id="<?php echo htmlspecialchars($docId); ?>" data-open-send-modal title="Send to department heads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Heads</button>
+                                            <a href="documents.php?view=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-open document-view-trigger" data-doc-id="<?php echo htmlspecialchars($docId); ?>" data-doc-name="<?php echo htmlspecialchars($docFileName); ?>" title="View document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>View</a>
+                                            <div class="documents-send-wrap">
+                                                <button type="button" class="documents-action-btn documents-action-send documents-send-trigger" data-document-id="<?php echo htmlspecialchars($docId); ?>" title="Send" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send</button>
+                                                <div class="documents-send-dropdown" role="menu" aria-label="Send options">
+                                                    <a href="documents.php?send=<?php echo urlencode($docId); ?>" class="documents-send-dropdown-item" data-send-action="super" onclick="return confirm('Send this document to Super Admin?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send to Super Admin</a>
+                                                    <button type="button" class="documents-send-dropdown-item" data-send-action="heads" data-document-id="<?php echo htmlspecialchars($docId); ?>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Send to Heads</button>
+                                                </div>
+                                            </div>
                                             <a href="documents.php?archive=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-archive" title="Archive document" onclick="return confirm('Archive this document?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</a>
                                         </div>
                                     </td>
@@ -608,7 +657,7 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
         <button type="button" class="doc-modal-overlay" data-close-send-document aria-label="Close"></button>
         <div class="doc-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="send-document-title">
             <div class="doc-modal-header">
-                <h2 id="send-document-title">Send document</h2>
+                <h2 id="send-document-title">Send to Heads</h2>
                 <button type="button" class="doc-modal-close" data-close-send-document aria-label="Close">&times;</button>
             </div>
             <p class="send-modal-subtitle">Select one or more department heads to send this document to.</p>
@@ -626,7 +675,7 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                 <?php endif; ?>
                 <div class="send-heads-list" id="send-heads-list">
                     <?php if (empty($departmentHeadsList)): ?>
-                    <p class="documents-empty" style="padding: 1.25rem; color: #64748b; text-align: center; margin: 0;">No department heads assigned yet. Assign heads in <strong>Departments</strong> first.</p>
+                    <p class="documents-empty" style="padding: 1rem 0; text-align: center; margin: 0;">No department heads assigned yet. Assign heads in <strong>Departments</strong> first.</p>
                     <?php else: ?>
                     <?php foreach ($departmentHeadsList as $head): ?>
                     <label class="send-head-row" data-send-head>
@@ -647,7 +696,28 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
         </div>
     </div>
 
+    <div class="doc-modal" id="document-view-modal" hidden>
+        <button type="button" class="doc-modal-overlay" data-close-document-view aria-label="Close"></button>
+        <div class="doc-modal-dialog doc-modal-dialog-view" role="dialog" aria-modal="true" aria-labelledby="document-view-title">
+            <div class="doc-modal-header">
+                <h2 id="document-view-title" class="document-view-title">Document</h2>
+                <button type="button" class="doc-modal-close" data-close-document-view aria-label="Close">&times;</button>
+            </div>
+            <div class="document-view-body">
+                <div id="document-view-loading" class="document-view-loading">Loading document…</div>
+                <div id="document-view-container" class="document-view-container" style="display:none;"></div>
+                <div id="document-view-error" class="document-view-error" style="display:none;">Could not load document.</div>
+            </div>
+            <div class="doc-modal-footer doc-modal-actions">
+                <a id="document-view-download-link" href="#" class="documents-action-btn documents-action-open" target="_blank" rel="noopener" download style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
+                <button type="button" class="documents-action-btn documents-action-open" data-close-document-view><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Close</button>
+            </div>
+        </div>
+    </div>
+
     <?php include __DIR__ . '/_profile_modal_admin.php'; ?>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.0/dist/docx-preview.min.js"></script>
     <script src="sidebar_admin.js"></script>
     <script>
     (function() {
@@ -783,17 +853,58 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
             }
         }
 
-        document.querySelectorAll('[data-open-send-modal]').forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                var docId = this.getAttribute('data-document-id') || '';
-                if (sendDocumentIdInput) sendDocumentIdInput.value = docId;
-                if (sendHeadsList) sendHeadsList.querySelectorAll('.send-head-cb').forEach(function(cb) { cb.checked = false; });
-                updateSendSelection();
-                if (sendModal) {
-                    sendModal.hidden = false;
-                    document.body.classList.add('modal-open');
+        function openSendModalForDoc(docId) {
+            if (sendDocumentIdInput) sendDocumentIdInput.value = docId;
+            if (sendHeadsList) sendHeadsList.querySelectorAll('.send-head-cb').forEach(function(cb) { cb.checked = false; });
+            updateSendSelection();
+            if (sendModal) {
+                sendModal.hidden = false;
+                document.body.classList.add('modal-open');
+            }
+        }
+
+        function closeAllSendDropdowns() {
+            document.querySelectorAll('.documents-send-wrap').forEach(function(wrap) {
+                wrap.classList.remove('open');
+                var dd = wrap.querySelector('.documents-send-dropdown');
+                if (dd) dd.classList.remove('show');
+                var trigger = wrap.querySelector('.documents-send-trigger');
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
+            });
+        }
+
+        document.querySelectorAll('.documents-send-trigger').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                var wrap = this.closest('.documents-send-wrap');
+                var dropdown = wrap ? wrap.querySelector('.documents-send-dropdown') : null;
+                var isOpen = wrap && wrap.classList.contains('open');
+                closeAllSendDropdowns();
+                if (!isOpen && wrap && dropdown) {
+                    var rect = this.getBoundingClientRect();
+                    dropdown.style.left = rect.left + 'px';
+                    dropdown.style.top = (rect.bottom + 4) + 'px';
+                    wrap.classList.add('open');
+                    dropdown.classList.add('show');
+                    this.setAttribute('aria-expanded', 'true');
                 }
             });
+        });
+
+        document.querySelectorAll('.documents-send-dropdown').forEach(function(dd) {
+            dd.addEventListener('click', function(e) { e.stopPropagation(); });
+        });
+
+        document.querySelectorAll('.documents-send-dropdown-item[data-send-action="heads"]').forEach(function(item) {
+            item.addEventListener('click', function(e) {
+                var docId = this.getAttribute('data-document-id') || '';
+                closeAllSendDropdowns();
+                openSendModalForDoc(docId);
+            });
+        });
+
+        document.addEventListener('click', function() {
+            closeAllSendDropdowns();
         });
 
         if (sendHeadsList) {
@@ -826,6 +937,90 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
         });
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape' && sendModal && !sendModal.hidden) closeSendDocumentModal();
+        });
+
+        // Document view modal (same as Super Admin)
+        var documentViewModal = document.getElementById('document-view-modal');
+        var documentViewTitle = document.getElementById('document-view-title');
+        var documentViewContainer = document.getElementById('document-view-container');
+        var documentViewLoading = document.getElementById('document-view-loading');
+        var documentViewError = document.getElementById('document-view-error');
+        var documentViewDownloadLink = document.getElementById('document-view-download-link');
+
+        function openDocumentViewModal(docId, docName) {
+            if (!documentViewModal || !documentViewContainer) return;
+            documentViewModal.hidden = false;
+            document.body.classList.add('modal-open');
+            documentViewTitle.textContent = docName || 'Document';
+            documentViewLoading.style.display = 'block';
+            documentViewContainer.style.display = 'none';
+            documentViewContainer.innerHTML = '';
+            documentViewError.style.display = 'none';
+            if (documentViewDownloadLink) {
+                documentViewDownloadLink.href = 'documents.php?download=' + encodeURIComponent(docId);
+                documentViewDownloadLink.style.display = 'inline-flex';
+            }
+
+            var viewUrl = 'documents.php?view=' + encodeURIComponent(docId);
+            fetch(viewUrl)
+                .then(function(res) {
+                    if (!res.ok) throw new Error('Load failed');
+                    var ct = (res.headers.get('Content-Type') || '').toLowerCase();
+                    if (ct.indexOf('wordprocessingml') === -1 && ct.indexOf('octet-stream') === -1) {
+                        return res.text().then(function() { throw new Error('Invalid response'); });
+                    }
+                    return res.blob();
+                })
+                .then(function(blob) {
+                    documentViewLoading.style.display = 'none';
+                    if (typeof docx !== 'undefined' && docx.renderAsync) {
+                        return docx.renderAsync(blob, documentViewContainer).then(function() {
+                            documentViewContainer.style.display = 'block';
+                        }).catch(function(err) {
+                            documentViewError.textContent = 'Could not render document.';
+                            documentViewError.style.display = 'block';
+                        });
+                    }
+                    documentViewError.textContent = 'Document viewer not available.';
+                    documentViewError.style.display = 'block';
+                })
+                .catch(function() {
+                    documentViewLoading.style.display = 'none';
+                    documentViewError.textContent = 'Could not load document.';
+                    documentViewError.style.display = 'block';
+                });
+        }
+
+        function closeDocumentViewModal() {
+            if (!documentViewModal) return;
+            documentViewModal.hidden = true;
+            document.body.classList.remove('modal-open');
+            if (documentViewContainer) {
+                documentViewContainer.innerHTML = '';
+                documentViewContainer.style.display = 'none';
+            }
+            if (documentViewLoading) documentViewLoading.style.display = 'block';
+            if (documentViewError) documentViewError.style.display = 'none';
+            if (documentViewDownloadLink) documentViewDownloadLink.style.display = 'none';
+        }
+
+        document.querySelectorAll('.document-view-trigger').forEach(function(el) {
+            el.addEventListener('click', function(e) {
+                e.preventDefault();
+                var docId = el.getAttribute('data-doc-id');
+                var docName = el.getAttribute('data-doc-name') || 'document.docx';
+                if (docId) openDocumentViewModal(docId, docName);
+            });
+        });
+
+        document.querySelectorAll('[data-close-document-view]').forEach(function(btn) {
+            btn.addEventListener('click', closeDocumentViewModal);
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && documentViewModal && !documentViewModal.hidden) {
+                closeDocumentViewModal();
+            }
         });
     })();
     </script>
