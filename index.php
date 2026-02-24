@@ -278,8 +278,8 @@ nav a:hover{
 
 
 .hero{
-    min-height:88vh;
-    padding:60px;
+    min-height:95vh;
+    padding:70px;
     display:grid;
     grid-template-columns:1.1fr 0.9fr;
     gap:40px;
@@ -650,10 +650,22 @@ nav a:hover{
     padding-top:32px;
 }
 
+html {
+    scroll-behavior: smooth;
+}
+
 .features{
     background:#0b1f3a;
     padding:120px 60px;
     text-align:center;
+}
+
+.features .section-intro {
+    max-width: 640px;
+    margin: -40px auto 50px;
+    font-size: 16px;
+    color: #cfd9eb;
+    line-height: 1.6;
 }
 
 .features h2{
@@ -662,12 +674,31 @@ nav a:hover{
     margin-bottom:70px;
 }
 
+/* Departments section – compact spacing, no excess */
+.departments-section{
+    padding:40px 40px 48px;
+}
+
+.departments-section h2{
+    margin-bottom:16px;
+}
+
+.departments-section .section-intro{
+    margin:0 auto 28px;
+}
+
 .feature-grid{
     max-width:1100px;
     margin:auto;
     display:grid;
     grid-template-columns:repeat(auto-fit,minmax(250px,1fr));
     gap:30px;
+}
+
+.department-grid{
+    max-width:1400px;
+    grid-template-columns:repeat(6,1fr);
+    gap:16px;
 }
 
 .feature{
@@ -691,6 +722,35 @@ nav a:hover{
 .feature p{
     font-size:14px;
     color:#cfd9eb;
+}
+
+/* Department boxes – reference style: rounded, dark blue, soft shadow, golden title, light text */
+.departments-section .feature{
+    background:#1B2956;
+    padding:28px 24px;
+    border-radius:24px;
+    border:none;
+    box-shadow:0 4px 24px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.04);
+}
+
+.departments-section .feature:hover{
+    box-shadow:0 8px 32px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.06);
+}
+
+.departments-section .feature h3{
+    color:#FFD700;
+    font-weight:700;
+    text-align:center;
+    margin-bottom:14px;
+    font-size:1rem;
+    line-height:1.3;
+}
+
+.departments-section .feature p{
+    color:#E8EEF4;
+    font-size:13px;
+    line-height:1.55;
+    text-align:left;
 }
 
 footer{
@@ -756,10 +816,29 @@ footer{
     color:#fff;
 }
 
+@media(max-width:1200px){
+    .department-grid{
+        grid-template-columns:repeat(3,1fr);
+    }
+}
+
+@media(max-width:768px){
+    .department-grid{
+        grid-template-columns:repeat(2,1fr);
+    }
+}
+
+@media(max-width:500px){
+    .department-grid{
+        grid-template-columns:1fr;
+    }
+}
+
 @media(max-width:900px){
     .hero{
         grid-template-columns:1fr;
         text-align:center;
+        padding: clamp(20px, 4vh, 40px) 24px;
     }
     .hero-actions{
         justify-content:center;
@@ -787,9 +866,10 @@ footer{
     </div>
 
     <nav>
-        <a href="#">Features</a>
-        <a href="#">Departments</a>
-        <a href="#">About</a>
+        <a href="#top">Home</a>
+        <a href="#features">Features</a>
+        <a href="#departments">Departments</a>
+        <a href="#about">About</a>
         <?php if ($isLoggedIn): ?>
             <a href="#" class="nav-btn"><?= htmlspecialchars($_SESSION['user_name']) ?></a>
             <a href="?logout=1" class="nav-btn">Logout</a>
@@ -799,7 +879,7 @@ footer{
     </nav>
 </header>
 
-<section class="hero">
+<section id="top" class="hero">
 
     <div class="hero-text">
         <!-- <div class="badge">Municipal Government Digital Solution</div> -->
@@ -878,7 +958,7 @@ footer{
 
 </section>
 
-<section class="features">
+<section id="features" class="features">
     <h2>System Features</h2>
 
     <div class="feature-grid">
@@ -910,6 +990,92 @@ footer{
         <div class="feature">
             <h3>Audit Logs & Transparency</h3>
             <p>Maintain accountability with detailed activity logs and document history tracking.</p>
+        </div>
+    </div>
+</section>
+
+<section id="departments" class="features departments-section">
+    <h2>Departments</h2>
+    <p class="section-intro">Municipal offices and departments of the Municipality of Solano, Nueva Vizcaya use the system for secure document management and coordination.</p>
+    <div class="feature-grid department-grid">
+        <div class="feature">
+            <h3>Municipal Mayor's Office – Business Permits & Licensing (MMO-BPLS)</h3>
+            <p>Business permits, licenses, and related documents.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Mayor's Office – Human Resource Management (MMO-HRMS)</h3>
+            <p>HR records, appointments, and personnel documents.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Accounting Office (MACCO)</h3>
+            <p>Accounting records, financial reports, and audit-related documents.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Budget Office (MBO)</h3>
+            <p>Budget proposals, appropriations, and budget execution documents.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Treasurer's Office (MTO)</h3>
+            <p>Collection records, disbursements, and treasury reports.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Assessor's Office (MAO)</h3>
+            <p>Property assessments, tax declarations, and valuation records.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Planning and Development Office (MPDO)</h3>
+            <p>Development plans, permits, and planning-related records.</p>
+        </div>
+        <div class="feature">
+            <h3>Solano Economic Enterprise and Development Office (SEEDO)</h3>
+            <p>Public market, slaughterhouse, and economic enterprise documents.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Agriculture Office (MAGRO)</h3>
+            <p>Agricultural programs, extension services, and related records.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Engineering Office (MEO)</h3>
+            <p>Infrastructure projects, permits, and engineering documents.</p>
+        </div>
+        
+            <h3>Municipal Health Office (MHO)</h3>
+            <p>Health programs, medical records, and sanitation documents.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Social Welfare and Development Office (MSWDO)</h3>
+            <p>Social services, assistance programs, and welfare records.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal General Services Office (MGSO)</h3>
+            <p>General administration, procurement, and property records.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Civil Registrar's Office (MCRO)</h3>
+            <p>Birth, marriage, death, and other civil registry documents.</p>
+        </div>
+        <div class="feature">
+            <h3>Municipal Disaster Risk Reduction and Management Office (MDRRMO)</h3>
+            <p>Disaster preparedness, response plans, and emergency management records.</p>
+        </div>
+    </div>
+</section>
+
+<section id="about" class="features about-section">
+    <h2>About</h2>
+    <p class="section-intro">The Municipal Document Management System (DMS) is a centralized digital platform for the Municipality of Solano, Nueva Vizcaya.</p>
+    <div class="feature-grid about-grid">
+        <div class="feature">
+            <h3>Purpose</h3>
+            <p>To efficiently manage, archive, monitor, and retrieve official municipal documents while enhancing transparency and inter-office coordination.</p>
+        </div>
+        <div class="feature">
+            <h3>Who Uses It</h3>
+            <p>Super Admin, Admin, Department Heads, and Front Desk staff—each with role-based access to documents and workflows.</p>
+        </div>
+        <div class="feature">
+            <h3>Contact</h3>
+            <p>For access or support, contact your department head or the municipal IT office.</p>
         </div>
     </div>
 </section>

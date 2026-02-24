@@ -10,7 +10,247 @@ if (!isset($_SESSION['user_id']) || !in_array($role, ['admin', 'staff', 'departm
 
 $config = require __DIR__ . '/../config.php';
 $documentsNamespace = $config['database'] . '.documents';
+if (!function_exists('getUserSignature')) require_once __DIR__ . '/../Super Admin Side/_account_helpers.php';
 
+function dmsEnsureDocxDrawingNamespaces($documentXml) {
+    $extra = [];
+    if (strpos($documentXml, 'xmlns:r=') === false) $extra[] = ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+    if (strpos($documentXml, 'xmlns:wp=') === false) $extra[] = ' xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"';
+    if (strpos($documentXml, 'xmlns:a=') === false) $extra[] = ' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"';
+    if (strpos($documentXml, 'xmlns:pic=') === false) $extra[] = ' xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"';
+    if (empty($extra)) return $documentXml;
+    return preg_replace('/<w:document\b([^>]*)>/', '<w:document$1' . implode('', $extra) . '>', $documentXml, 1);
+}
+
+function dmsFormatActorName($value) {
+    $text = trim((string)$value);
+    if ($text === '') return '—';
+    $lower = strtolower($text);
+    if ($lower === 'super admin' || strpos($lower, 'superadmin@') === 0) return 'Super Admin';
+    if (strpos($lower, '@') !== false && filter_var($text, FILTER_VALIDATE_EMAIL)) {
+        $local = preg_replace('/@.*$/', '', $text);
+        $local = preg_replace('/[._-]+/', ' ', (string)$local);
+        $local = trim((string)$local);
+        if ($local === '') return '—';
+        if (strtolower($local) === 'superadmin') return 'Super Admin';
+        if (strtolower($local) === 'admin') return 'Admin';
+        return mb_convert_case($local, MB_CASE_TITLE, 'UTF-8');
+    }
+    return $text;
+}
+
+function dmsInsertDrawingBlockByPosY($documentXml, $blockXml, $posY, &$paragraphOffsetYEmu = 0) {
+    if (!is_string($documentXml) || $documentXml === '' || !is_string($blockXml) || $blockXml === '') return false;
+    if (!preg_match('/<w:body\b([^>]*)>([\s\S]*?)<\/w:body>/', $documentXml, $bodyMatch, PREG_OFFSET_CAPTURE)) {
+        return false;
+    }
+
+    $bodyAttrs = $bodyMatch[1][0];
+    $bodyInner = $bodyMatch[2][0];
+    $bodyStart = $bodyMatch[0][1];
+    $bodyLen = strlen($bodyMatch[0][0]);
+
+    $contentInner = $bodyInner;
+    $sectPrTail = '';
+    if (preg_match('/^(.*?)(<w:sectPr\b[\s\S]*<\/w:sectPr>\s*)$/', $bodyInner, $sectMatch)) {
+        $contentInner = $sectMatch[1];
+        $sectPrTail = $sectMatch[2];
+    }
+
+    $paragraphOffsetYEmu = 0;
+    $updatedContent = $contentInner;
+    if (preg_match_all('/<(w:p|w:tbl)\b[^>]*>/', $contentInner, $blockMatches, PREG_OFFSET_CAPTURE) && !empty($blockMatches[0])) {
+        // Keep the anchor paragraph near the top of the page.
+        // Vertical placement in-file is controlled by wp:positionV (page offset),
+        // which maps better to the drag position than paragraph-based anchoring.
+        $insertAt = $blockMatches[0][0][1];
+        $updatedContent = substr($contentInner, 0, $insertAt) . $blockXml . substr($contentInner, $insertAt);
+    } else {
+        $updatedContent = $blockXml . $contentInner;
+    }
+
+    $newBody = '<w:body' . $bodyAttrs . '>' . $updatedContent . $sectPrTail . '</w:body>';
+    return substr($documentXml, 0, $bodyStart) . $newBody . substr($documentXml, $bodyStart + $bodyLen);
+}
+
+function dmsApplySignatureToDocx($sourceFileContent, $signatureDataUri, $signedBy, $signedAtText, $posX = 0.72, $posY = 0.06) {
+    if ($sourceFileContent === '' || $signatureDataUri === '') return false;
+    if (!class_exists('ZipArchive')) return false;
+
+    $sourceText = (string)$sourceFileContent;
+    $sourceBinary = false;
+    $sourceClean = preg_replace('/\s+/', '', $sourceText);
+    if ($sourceClean !== null && $sourceClean !== '') {
+        $sourceBinary = base64_decode($sourceClean, true);
+        if ($sourceBinary === false) {
+            $sourceBinary = base64_decode($sourceClean, false);
+        }
+    }
+    if ($sourceBinary === false || $sourceBinary === '') {
+        $sourceBinary = $sourceText;
+    }
+    if (strpos($sourceBinary, "PK") !== 0) {
+        return false;
+    }
+
+    $sigText = trim((string)$signatureDataUri);
+    $imgExt = 'png';
+    $imgBytes = false;
+    if (preg_match('/^data:image\/([a-zA-Z0-9.+-]+);base64,([a-zA-Z0-9+\/=\s]+)$/', $sigText, $m)) {
+        $rawExt = strtolower($m[1]);
+        $imgExt = ($rawExt === 'jpg') ? 'jpeg' : $rawExt;
+        if (!in_array($imgExt, ['png', 'jpeg', 'gif', 'webp', 'bmp'], true)) $imgExt = 'png';
+        $imgBytes = base64_decode(preg_replace('/\s+/', '', $m[2]), true);
+    } else {
+        // Backward-compat fallback if stored value is raw base64.
+        $imgBytes = base64_decode(preg_replace('/\s+/', '', $sigText), true);
+    }
+    if ($imgBytes === false || $imgBytes === '') return false;
+
+    $tmpDocx = tempnam(sys_get_temp_dir(), 'dms_docx_');
+    if ($tmpDocx === false) return false;
+    if (file_put_contents($tmpDocx, $sourceBinary) === false) {
+        @unlink($tmpDocx);
+        return false;
+    }
+
+    $zip = new ZipArchive();
+    if ($zip->open($tmpDocx) !== true) {
+        @unlink($tmpDocx);
+        return false;
+    }
+
+    $documentXml = $zip->getFromName('word/document.xml');
+    $relsXml = $zip->getFromName('word/_rels/document.xml.rels');
+    if ($documentXml === false) {
+        $zip->close();
+        @unlink($tmpDocx);
+        return false;
+    }
+    if ($relsXml === false || trim($relsXml) === '') {
+        $relsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+    }
+
+    $documentXml = dmsEnsureDocxDrawingNamespaces($documentXml);
+
+    preg_match_all('/Id="rId(\d+)"/', $relsXml, $ridMatches);
+    $nextRid = 1;
+    if (!empty($ridMatches[1])) {
+        $nextRid = max(array_map('intval', $ridMatches[1])) + 1;
+    }
+    $rid = 'rId' . $nextRid;
+    $imgName = 'signature_' . time() . '_' . mt_rand(1000, 9999) . '.' . $imgExt;
+    if ($zip->addFromString('word/media/' . $imgName, $imgBytes) === false) {
+        $zip->close();
+        @unlink($tmpDocx);
+        return false;
+    }
+
+    $relTag = '<Relationship Id="' . $rid . '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/' . $imgName . '"/>';
+    $relsXmlUpdated = preg_replace('/<\/Relationships>/', $relTag . '</Relationships>', $relsXml, 1);
+    if ($relsXmlUpdated === null || $relsXmlUpdated === $relsXml) {
+        $relsXml = rtrim($relsXml) . $relTag;
+        if (strpos($relsXml, '</Relationships>') === false) {
+            $relsXml .= '</Relationships>';
+        }
+    } else {
+        $relsXml = $relsXmlUpdated;
+    }
+
+    $cx = 2286000; // ~240px
+    $cy = 857250;  // ~90px
+    $pageWidthTwips = 11906;   // A4 defaults
+    $pageHeightTwips = 16838;  // A4 defaults
+    $marginLeftTwips = 1800;
+    $marginRightTwips = 1800;
+    $marginTopTwips = 1440;
+    $marginBottomTwips = 1440;
+    if (preg_match('/<w:pgSz\b[^>]*\bw:w="(\d+)"/', $documentXml, $mPgW)) $pageWidthTwips = (int)$mPgW[1];
+    if (preg_match('/<w:pgSz\b[^>]*\bw:h="(\d+)"/', $documentXml, $mPgH)) $pageHeightTwips = (int)$mPgH[1];
+    if (preg_match('/<w:pgMar\b[^>]*\bw:left="(\d+)"/', $documentXml, $mMarL)) $marginLeftTwips = (int)$mMarL[1];
+    if (preg_match('/<w:pgMar\b[^>]*\bw:right="(\d+)"/', $documentXml, $mMarR)) $marginRightTwips = (int)$mMarR[1];
+    if (preg_match('/<w:pgMar\b[^>]*\bw:top="(\d+)"/', $documentXml, $mMarT)) $marginTopTwips = (int)$mMarT[1];
+    if (preg_match('/<w:pgMar\b[^>]*\bw:bottom="(\d+)"/', $documentXml, $mMarB)) $marginBottomTwips = (int)$mMarB[1];
+    $pageWidth = max(1, $pageWidthTwips * 635);
+    $pageHeight = max(1, $pageHeightTwips * 635);
+    $contentWidth = max(1, ($pageWidthTwips - $marginLeftTwips - $marginRightTwips) * 635);
+    $contentHeight = max(1, ($pageHeightTwips - $marginTopTwips - $marginBottomTwips) * 635);
+    $safePosX = max(0.0, min(1.0, (float)$posX));
+    $safePosY = max(0.0, min(1.0, (float)$posY));
+    $maxX = max(0, $contentWidth - $cx);
+    $maxY = max(0, $contentHeight - $cy);
+    $offsetX = (int)round($safePosX * $maxX);
+    $offsetY = (int)round($safePosY * $maxY);
+    $docPrId = (string)(10000 + mt_rand(1, 89999));
+    $docPrName = htmlspecialchars(trim((string)$signedBy) !== '' ? ('Signature - ' . $signedBy) : 'Signature', ENT_XML1 | ENT_QUOTES, 'UTF-8');
+
+    $signatureBlock =
+        '<w:p><w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="251658240" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">' .
+        '<wp:simplePos x="0" y="0"/>' .
+        '<wp:positionH relativeFrom="margin"><wp:posOffset>' . $offsetX . '</wp:posOffset></wp:positionH>' .
+        '<wp:positionV relativeFrom="margin"><wp:posOffset>' . $offsetY . '</wp:posOffset></wp:positionV>' .
+        '<wp:extent cx="' . $cx . '" cy="' . $cy . '"/><wp:effectExtent l="0" t="0" r="0" b="0"/>' .
+        '<wp:wrapNone/><wp:docPr id="' . $docPrId . '" name="' . $docPrName . '"/><wp:cNvGraphicFramePr/>' .
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' .
+        '<pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="' . htmlspecialchars($imgName, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '"/><pic:cNvPicPr/></pic:nvPicPr>' .
+        '<pic:blipFill><a:blip r:embed="' . $rid . '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' .
+        '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' . $cx . '" cy="' . $cy . '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>' .
+        '</pic:pic></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r></w:p>';
+
+    $inlineSignatureBlock =
+        '<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">' .
+        '<wp:extent cx="' . $cx . '" cy="' . $cy . '"/><wp:effectExtent l="0" t="0" r="0" b="0"/>' .
+        '<wp:docPr id="' . $docPrId . '" name="' . $docPrName . '"/><wp:cNvGraphicFramePr/>' .
+        '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' .
+        '<pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="' . htmlspecialchars($imgName, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '"/><pic:cNvPicPr/></pic:nvPicPr>' .
+        '<pic:blipFill><a:blip r:embed="' . $rid . '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' .
+        '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' . $cx . '" cy="' . $cy . '"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>' .
+        '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+
+    $paragraphOffsetYEmu = 0;
+    $documentXmlUpdated = dmsInsertDrawingBlockByPosY($documentXml, $signatureBlock, $safePosY, $paragraphOffsetYEmu);
+    if ($documentXmlUpdated === false && preg_match('/<w:body\s*\/>/', $documentXml)) {
+        $expanded = preg_replace('/<w:body\s*\/>/', '<w:body></w:body>', $documentXml, 1);
+        if (is_string($expanded) && $expanded !== '') {
+            $documentXmlUpdated = dmsInsertDrawingBlockByPosY($expanded, $signatureBlock, $safePosY, $paragraphOffsetYEmu);
+        }
+    }
+
+    if (!is_string($documentXmlUpdated) || $documentXmlUpdated === '' || $documentXmlUpdated === $documentXml) {
+        // Fallback: use inline drawing insertion if anchored insertion did not match this DOCX shape.
+        $documentXmlUpdated = dmsInsertDrawingBlockByPosY($documentXml, $inlineSignatureBlock, $safePosY, $paragraphOffsetYEmu);
+        if ($documentXmlUpdated === false && preg_match('/<w:body\s*\/>/', $documentXml)) {
+            $expanded = preg_replace('/<w:body\s*\/>/', '<w:body></w:body>', $documentXml, 1);
+            if (is_string($expanded) && $expanded !== '') {
+                $documentXmlUpdated = dmsInsertDrawingBlockByPosY($expanded, $inlineSignatureBlock, $safePosY, $paragraphOffsetYEmu);
+            }
+        }
+    }
+
+    if (!is_string($documentXmlUpdated) || $documentXmlUpdated === '' || $documentXmlUpdated === $documentXml) {
+        $zip->close();
+        @unlink($tmpDocx);
+        return false;
+    }
+
+    if ($zip->addFromString('word/document.xml', $documentXmlUpdated) === false) {
+        $zip->close();
+        @unlink($tmpDocx);
+        return false;
+    }
+    if ($zip->addFromString('word/_rels/document.xml.rels', $relsXml) === false) {
+        $zip->close();
+        @unlink($tmpDocx);
+        return false;
+    }
+    $zip->close();
+
+    $updatedBinary = file_get_contents($tmpDocx);
+    @unlink($tmpDocx);
+    if ($updatedBinary === false) return false;
+    return base64_encode($updatedBinary);
+}
 // View document (inline – open in browser/viewer); must run before any includes that could output
 if (!empty($_GET['view']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['view'])) {
     try {
@@ -63,18 +303,309 @@ if (!empty($_GET['download']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['download
     exit;
 }
 
+// Return signature metadata for a document (AJAX)
+if (!empty($_GET['signature_meta']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['signature_meta'])) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(
+            ['_id' => new MongoDB\BSON\ObjectId($_GET['signature_meta'])],
+            ['projection' => ['signedSignature' => 1, 'signedByUserName' => 1, 'signedAt' => 1, 'signedPosX' => 1, 'signedPosY' => 1]]
+        );
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $docs = $cursor->toArray();
+        $payload = ['success' => false];
+        if (count($docs) > 0) {
+            $d = (array)$docs[0];
+            $signedAtText = '';
+            if (!empty($d['signedAt']) && $d['signedAt'] instanceof MongoDB\BSON\UTCDateTime) {
+                $signedAtText = $d['signedAt']->toDateTime()->setTimezone(new DateTimeZone('Asia/Manila'))->format('M d, Y h:i A');
+            }
+            $payload = [
+                'success' => true,
+                'signedSignature' => (string)($d['signedSignature'] ?? ''),
+                'signedByUserName' => (string)($d['signedByUserName'] ?? ''),
+                'signedAtText' => $signedAtText,
+                'signedPosX' => isset($d['signedPosX']) ? (float)$d['signedPosX'] : 0.72,
+                'signedPosY' => isset($d['signedPosY']) ? (float)$d['signedPosY'] : 0.06,
+            ];
+        }
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode($payload);
+        exit;
+    } catch (Exception $e) {
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Failed to load metadata.']);
+        exit;
+    }
+}
+
 $userName = $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User';
 $userEmail = $_SESSION['user_email'] ?? '';
 $userRole = $_SESSION['user_role'] ?? 'Admin';
 $userDepartment = $_SESSION['user_department'] ?? 'Not Assigned';
 $userInitial = mb_strtoupper(mb_substr($userName, 0, 1));
-$sidebar_active = 'documents';
+$documentsScope = (string)($_GET['scope'] ?? '');
+$showArchived = $documentsScope === 'archived';
+$showSignedOnly = $documentsScope === 'signed';
+$isArchiveView = ($showArchived || $showSignedOnly);
+$sidebar_active = $isArchiveView ? 'archived' : 'documents';
+$pageHeading = $isArchiveView ? 'Archived Documents' : 'Documents';
+$pageSubtitle = $isArchiveView
+    ? 'Review signed and archived document records.'
+    : 'Create, track, and manage municipal documents across all departments';
+$cardHeading = $isArchiveView ? 'Archived Documents' : 'Documents';
+$searchPlaceholder = $isArchiveView ? 'Search archived document by code or title' : 'Search by code or title';
+$emptyRowText = $isArchiveView ? 'No archived documents yet.' : 'No documents yet.';
 $documentsList = [];
+$sentToByDocId = [];
+$receivedByDocId = [];
+$sentByAdminByDocId = [];
 $addMessage = null;
 $addError = null;
 
 if (!function_exists('getUserPhoto')) require_once __DIR__ . '/../Super Admin Side/_account_helpers.php';
 if (function_exists('getUserPhoto') && !empty($_SESSION['user_id'])) { $fp = getUserPhoto($_SESSION['user_id']); if ($fp !== '') $_SESSION['user_photo'] = $fp; }
+$currentUserSignature = (function_exists('getUserSignature') && !empty($_SESSION['user_id'])) ? (getUserSignature($_SESSION['user_id']) ?: ($_SESSION['user_signature'] ?? '')) : ($_SESSION['user_signature'] ?? '');
+
+// Sign document in-system (AJAX) using current user's saved signature
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'sign_document') {
+    $docId = trim($_POST['document_id'] ?? '');
+    if (!preg_match('/^[a-f0-9]{24}$/i', $docId)) {
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Invalid document id.']);
+        exit;
+    }
+    $sig = trim((string)$currentUserSignature);
+    if ($sig === '') {
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'No profile signature found. Please set your signature first in Settings.']);
+        exit;
+    }
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $docQuery = new MongoDB\Driver\Query(
+            ['_id' => new MongoDB\BSON\ObjectId($docId)],
+            ['projection' => ['fileContent' => 1, 'originalFileContent' => 1]]
+        );
+        $docCursor = $manager->executeQuery($documentsNamespace, $docQuery);
+        $docRows = $docCursor->toArray();
+        if (count($docRows) === 0) {
+            if (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => 'Document not found.']);
+            exit;
+        }
+        $docData = (array)$docRows[0];
+        $now = new MongoDB\BSON\UTCDateTime();
+        $setData = [
+            'signedSignature' => $sig,
+            'signedByUserId' => (string)($_SESSION['user_id'] ?? ''),
+            'signedByUserName' => (string)($_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User'),
+            'signedAt' => $now,
+            'signedPosX' => 0.72,
+            'signedPosY' => 0.06,
+            'status' => 'signed',
+        ];
+        $currentOriginal = (string)($docData['originalFileContent'] ?? '');
+        $currentFile = (string)($docData['fileContent'] ?? '');
+        if ($currentOriginal === '' && $currentFile !== '') {
+            $setData['originalFileContent'] = $currentFile;
+        }
+        $bulk = new MongoDB\Driver\BulkWrite;
+        $bulk->update(
+            ['_id' => new MongoDB\BSON\ObjectId($docId)],
+            ['$set' => $setData],
+            ['multi' => false]
+        );
+        $manager->executeBulkWrite($documentsNamespace, $bulk);
+        $signedAtText = $now->toDateTime()->setTimezone(new DateTimeZone('Asia/Manila'))->format('M d, Y h:i A');
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => true,
+            'message' => 'Signature inserted and saved.',
+            'signedSignature' => $sig,
+            'signedByUserName' => (string)($_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User'),
+            'signedAtText' => $signedAtText,
+            'signedPosX' => 0.72,
+            'signedPosY' => 0.06,
+        ]);
+        exit;
+    } catch (Exception $e) {
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Failed to save signature.']);
+        exit;
+    }
+}
+
+// Delete signature from document (AJAX)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete_signature') {
+    $docId = trim($_POST['document_id'] ?? '');
+    if (!preg_match('/^[a-f0-9]{24}$/i', $docId)) {
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Invalid document id.']);
+        exit;
+    }
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(
+            ['_id' => new MongoDB\BSON\ObjectId($docId)],
+            ['projection' => ['fileContent' => 1, 'originalFileContent' => 1]]
+        );
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $rows = $cursor->toArray();
+        if (count($rows) === 0) {
+            if (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => 'Document not found.']);
+            exit;
+        }
+        $doc = (array)$rows[0];
+
+        $updateDoc = [
+            '$unset' => [
+                'signedSignature' => '',
+                'signedByUserId' => '',
+                'signedByUserName' => '',
+                'signedAt' => '',
+                'signedPosX' => '',
+                'signedPosY' => '',
+            ],
+        ];
+        $nextStatus = 'added';
+        try {
+            $sentToAdminNamespace = $config['database'] . '.sent_to_admin';
+            $sentQuery = new MongoDB\Driver\Query(['documentId' => $docId], ['limit' => 1]);
+            $sentCursor = $manager->executeQuery($sentToAdminNamespace, $sentQuery);
+            if (count($sentCursor->toArray()) > 0) {
+                $nextStatus = 'received';
+            }
+        } catch (Exception $e) {}
+        $originalFileContent = (string)($doc['originalFileContent'] ?? '');
+        if ($originalFileContent !== '') {
+            $updateDoc['$set'] = ['fileContent' => $originalFileContent, 'status' => $nextStatus];
+        } else {
+            $updateDoc['$set'] = ['status' => $nextStatus];
+        }
+
+        $bulk = new MongoDB\Driver\BulkWrite;
+        $bulk->update(
+            ['_id' => new MongoDB\BSON\ObjectId($docId)],
+            $updateDoc,
+            ['multi' => false]
+        );
+        $manager->executeBulkWrite($documentsNamespace, $bulk);
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => true, 'message' => 'Signature deleted.']);
+        exit;
+    } catch (Exception $e) {
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Failed to delete signature.']);
+        exit;
+    }
+}
+
+// Save signature position (AJAX)
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'save_signature_position') {
+    $docId = trim($_POST['document_id'] ?? '');
+    $posX = isset($_POST['pos_x']) ? (float)$_POST['pos_x'] : -1;
+    $posY = isset($_POST['pos_y']) ? (float)$_POST['pos_y'] : -1;
+    if (!preg_match('/^[a-f0-9]{24}$/i', $docId) || $posX < 0 || $posX > 1 || $posY < 0 || $posY > 1) {
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Invalid save data.']);
+        exit;
+    }
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $query = new MongoDB\Driver\Query(
+            ['_id' => new MongoDB\BSON\ObjectId($docId)],
+            ['projection' => ['fileContent' => 1, 'originalFileContent' => 1, 'signedSignature' => 1, 'signedByUserName' => 1, 'signedAt' => 1]]
+        );
+        $cursor = $manager->executeQuery($documentsNamespace, $query);
+        $rows = $cursor->toArray();
+        if (count($rows) === 0) {
+            if (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => 'Document not found.']);
+            exit;
+        }
+
+        $doc = (array)$rows[0];
+        $signatureData = (string)($doc['signedSignature'] ?? '');
+        if ($signatureData === '') {
+            if (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => 'Insert signature first before saving.']);
+            exit;
+        }
+
+        $sourceFileContent = (string)($doc['originalFileContent'] ?? $doc['fileContent'] ?? '');
+        if ($sourceFileContent === '') {
+            if (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => 'Document file is empty.']);
+            exit;
+        }
+
+        $signedByName = (string)($doc['signedByUserName'] ?? ($_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User'));
+        $signedAtText = '';
+        if (!empty($doc['signedAt']) && $doc['signedAt'] instanceof MongoDB\BSON\UTCDateTime) {
+            $signedAtText = $doc['signedAt']->toDateTime()->setTimezone(new DateTimeZone('Asia/Manila'))->format('M d, Y h:i A');
+        }
+        if (!class_exists('ZipArchive')) {
+            if (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/json');
+            echo json_encode([
+                'success' => false,
+                'message' => 'Server configuration issue: PHP ZIP extension is not enabled. Enable php_zip and restart Laragon/Apache.',
+            ]);
+            exit;
+        }
+
+        $updatedFileContent = dmsApplySignatureToDocx($sourceFileContent, $signatureData, $signedByName, $signedAtText, $posX, $posY);
+        if ($updatedFileContent === false) {
+            if (ob_get_level()) ob_end_clean();
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => 'Could not write signature into the file.']);
+            exit;
+        }
+
+        $bulk = new MongoDB\Driver\BulkWrite;
+        $setData = [
+            'signedPosX' => $posX,
+            'signedPosY' => $posY,
+            'fileContent' => $updatedFileContent,
+            'status' => 'signed',
+        ];
+        if (!isset($doc['originalFileContent']) || $doc['originalFileContent'] === '') {
+            $setData['originalFileContent'] = $sourceFileContent;
+        }
+        $bulk->update(
+            ['_id' => new MongoDB\BSON\ObjectId($docId)],
+            ['$set' => $setData],
+            ['multi' => false]
+        );
+        $manager->executeBulkWrite($documentsNamespace, $bulk);
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => true, 'message' => 'Signature saved in database and document file.']);
+        exit;
+    } catch (Exception $e) {
+        if (ob_get_level()) ob_end_clean();
+        header('Content-Type: application/json');
+        echo json_encode(['success' => false, 'message' => 'Failed to save position.']);
+        exit;
+    }
+}
 
 // Archive document and log to document history
 if (!empty($_GET['archive']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['archive'])) {
@@ -132,6 +663,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $docs = $cursor->toArray();
             if (count($docs) > 0) {
                 $doc = (array)$docs[0];
+                $docIsSignedAtSend = (strtolower(trim((string)($doc['status'] ?? ''))) === 'signed') || !empty($doc['signedSignature']);
+                $docStatusAtSend = strtolower(trim((string)($doc['status'] ?? '')));
                 $officesNamespace = $config['database'] . '.' . ($config['collection'] ?? 'offices');
                 $sentNamespace = $config['database'] . '.sent_to_department_heads';
                 $bulk = new MongoDB\Driver\BulkWrite;
@@ -156,6 +689,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                                 'sentAt'          => new MongoDB\BSON\UTCDateTime(),
                                 'sentByUserId'    => $_SESSION['user_id'] ?? '',
                                 'sentByUserName'  => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+                                'signedAtSend'    => $docIsSignedAtSend,
                             ]);
                             $sentCount++;
                         }
@@ -163,6 +697,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 }
                 if ($sentCount > 0) {
                     $manager->executeBulkWrite($sentNamespace, $bulk);
+                    $docBulk = new MongoDB\Driver\BulkWrite;
+                    $setDocData = [
+                        'isSent' => true,
+                        'sentAt' => new MongoDB\BSON\UTCDateTime(),
+                        'sentVia' => 'heads',
+                    ];
+                    if ($docStatusAtSend === 'added' || $docStatusAtSend === 'sent') {
+                        $setDocData['status'] = 'received';
+                    }
+                    $docBulk->update(
+                        ['_id' => new MongoDB\BSON\ObjectId($docId)],
+                        ['$set' => $setDocData],
+                        ['multi' => false]
+                    );
+                    $manager->executeBulkWrite($documentsNamespace, $docBulk);
+                    $historyNamespace = $config['database'] . '.document_history';
+                    $historyBulk = new MongoDB\Driver\BulkWrite;
+                    $historyBulk->insert([
+                        'documentId'    => $docId,
+                        'documentCode'  => $doc['documentCode'] ?? $doc['document_code'] ?? '',
+                        'documentTitle' => $doc['documentTitle'] ?? $doc['document_title'] ?? '',
+                        'action'        => 'Sent to Heads',
+                        'dateTime'      => new MongoDB\BSON\UTCDateTime(),
+                        'userId'        => $_SESSION['user_id'] ?? '',
+                        'userName'      => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+                    ]);
+                    $manager->executeBulkWrite($historyNamespace, $historyBulk);
                     header('Location: documents.php?sent_head=1&count=' . (int)$sentCount);
                     exit;
                 }
@@ -186,6 +747,8 @@ if (!empty($_GET['send']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['send'])) {
             $docCode = $doc['documentCode'] ?? $doc['document_code'] ?? '';
             $docTitle = $doc['documentTitle'] ?? $doc['document_title'] ?? '';
             $fileName = $doc['fileName'] ?? $doc['file_name'] ?? 'document.docx';
+            $docIsSignedAtSend = (strtolower(trim((string)($doc['status'] ?? ''))) === 'signed') || !empty($doc['signedSignature']);
+            $docStatusAtSend = strtolower(trim((string)($doc['status'] ?? '')));
             $sentNamespace = $config['database'] . '.sent_to_super_admin';
             $bulk = new MongoDB\Driver\BulkWrite;
             $bulk->insert([
@@ -196,8 +759,36 @@ if (!empty($_GET['send']) && preg_match('/^[a-f0-9]{24}$/i', $_GET['send'])) {
                 'sentAt'         => new MongoDB\BSON\UTCDateTime(),
                 'sentByUserId'   => $_SESSION['user_id'] ?? '',
                 'sentByUserName' => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+                'signedAtSend'   => $docIsSignedAtSend,
             ]);
             $manager->executeBulkWrite($sentNamespace, $bulk);
+            $docBulk = new MongoDB\Driver\BulkWrite;
+            $setDocData = [
+                'isSent' => true,
+                'sentAt' => new MongoDB\BSON\UTCDateTime(),
+                'sentVia' => 'super_admin',
+            ];
+            if ($docStatusAtSend === 'added' || $docStatusAtSend === 'sent') {
+                $setDocData['status'] = 'received';
+            }
+            $docBulk->update(
+                ['_id' => new MongoDB\BSON\ObjectId($sendId)],
+                ['$set' => $setDocData],
+                ['multi' => false]
+            );
+            $manager->executeBulkWrite($documentsNamespace, $docBulk);
+            $historyNamespace = $config['database'] . '.document_history';
+            $historyBulk = new MongoDB\Driver\BulkWrite;
+            $historyBulk->insert([
+                'documentId'    => $sendId,
+                'documentCode'  => $docCode,
+                'documentTitle' => $docTitle,
+                'action'        => 'Sent to Super Admin',
+                'dateTime'      => new MongoDB\BSON\UTCDateTime(),
+                'userId'        => $_SESSION['user_id'] ?? '',
+                'userName'      => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+            ]);
+            $manager->executeBulkWrite($historyNamespace, $historyBulk);
         }
     } catch (Exception $e) {}
     header('Location: documents.php?sent=1');
@@ -235,7 +826,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         'fileContent'   => $fileContent,
                         'createdAt'     => $now,
                         'createdBy'     => $_SESSION['user_id'] ?? '',
-                        'status'        => 'active',
+                        'createdByName' => $_SESSION['user_name'] ?? $_SESSION['user_email'] ?? 'User',
+                        'status'        => 'added',
                     ]);
                     $manager->executeBulkWrite($documentsNamespace, $bulk);
                     $historyNamespace = $config['database'] . '.document_history';
@@ -268,7 +860,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
 // Fetch documents from database (active only; exclude archived)
 try {
     $manager = new MongoDB\Driver\Manager($config['uri']);
-    $filter = ['status' => ['$ne' => 'archived']];
+    if ($showArchived) {
+        $filter = ['status' => 'archived'];
+    } elseif ($showSignedOnly) {
+        $filter = ['status' => 'signed', 'isSent' => true];
+    } else {
+        // Active Documents view excludes any doc that is already both signed and sent,
+        // so those records "move" to admin_archive.php automatically.
+        $filter = [
+            'status' => ['$ne' => 'archived'],
+            '$or' => [
+                ['status' => ['$ne' => 'signed']],
+                ['isSent' => ['$ne' => true]],
+            ],
+        ];
+    }
     $query = new MongoDB\Driver\Query($filter, ['sort' => ['createdAt' => -1], 'limit' => 500]);
     $cursor = $manager->executeQuery($documentsNamespace, $query);
     foreach ($cursor as $doc) {
@@ -278,6 +884,127 @@ try {
     }
 } catch (Exception $e) {
     $documentsList = [];
+}
+
+// Do not auto-show documents that were directly ADDED by Super Admin.
+// (Sent-to-admin records are handled separately below.)
+if (!$showArchived && !$showSignedOnly && !empty($documentsList)) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $usersNamespace = $config['database'] . '.users';
+        $currentUserId = (string)($_SESSION['user_id'] ?? '');
+        $currentUserName = trim((string)($_SESSION['user_name'] ?? ''));
+        $currentUserEmail = trim((string)($_SESSION['user_email'] ?? ''));
+        $creatorIdsMap = [];
+        foreach ($documentsList as $doc) {
+            $creatorId = (string)($doc['createdBy'] ?? '');
+            if ($creatorId !== '' && preg_match('/^[a-f0-9]{24}$/i', $creatorId)) {
+                $creatorIdsMap[$creatorId] = new MongoDB\BSON\ObjectId($creatorId);
+            }
+        }
+        if (!empty($creatorIdsMap)) {
+            $uq = new MongoDB\Driver\Query(
+                [
+                    '_id' => ['$in' => array_values($creatorIdsMap)],
+                    'role' => ['$in' => ['superadmin', 'super_admin', 'super admin']],
+                ],
+                ['projection' => ['_id' => 1]]
+            );
+            $uc = $manager->executeQuery($usersNamespace, $uq);
+            $superAdminCreatorIds = [];
+            foreach ($uc as $u) {
+                $ua = (array)$u;
+                $uid = (string)($ua['_id'] ?? '');
+                if ($uid !== '') $superAdminCreatorIds[$uid] = true;
+            }
+            if (!empty($superAdminCreatorIds)) {
+                $documentsList = array_values(array_filter($documentsList, function ($doc) use ($superAdminCreatorIds, $currentUserId, $currentUserName, $currentUserEmail) {
+                    $creatorId = (string)($doc['createdBy'] ?? '');
+                    // Always keep documents created by the current admin user.
+                    if ($currentUserId !== '' && $creatorId === $currentUserId) return true;
+                    $creatorName = trim((string)($doc['createdByName'] ?? ''));
+                    if ($currentUserName !== '' && strcasecmp($creatorName, $currentUserName) === 0) return true;
+                    if ($currentUserEmail !== '' && strcasecmp($creatorName, $currentUserEmail) === 0) return true;
+                    return !isset($superAdminCreatorIds[$creatorId]);
+                }));
+            }
+        }
+    } catch (Exception $e) {}
+}
+
+// Archive page rule: show only docs that are BOTH signed and sent.
+// Also supports older records by checking send collections if isSent is missing.
+if ($showSignedOnly && !empty($documentsList)) {
+    $sentIds = [];
+    try {
+        $sentSuperNs = $config['database'] . '.sent_to_super_admin';
+        $sentHeadsNs = $config['database'] . '.sent_to_department_heads';
+        $signedDocIds = array_values(array_filter(array_map(function ($d) {
+            return (string)($d['_id'] ?? '');
+        }, $documentsList)));
+        $qSuper = new MongoDB\Driver\Query(
+            ['documentId' => ['$in' => $signedDocIds], 'signedAtSend' => true],
+            ['projection' => ['documentId' => 1], 'limit' => 3000]
+        );
+        foreach ($manager->executeQuery($sentSuperNs, $qSuper) as $r) {
+            $a = (array)$r;
+            $id = (string)($a['documentId'] ?? '');
+            if ($id === '') continue;
+            $sentIds[$id] = true;
+            if (!isset($sentToByDocId[$id])) $sentToByDocId[$id] = [];
+            $sentToByDocId[$id]['Super Admin'] = true;
+            $sentByName = trim((string)($a['sentByUserName'] ?? ''));
+            if ($sentByName !== '') $sentByAdminByDocId[$id] = $sentByName;
+        }
+        $qHeads = new MongoDB\Driver\Query(
+            ['documentId' => ['$in' => $signedDocIds], 'signedAtSend' => true],
+            ['projection' => ['documentId' => 1, 'officeHeadName' => 1], 'limit' => 3000]
+        );
+        foreach ($manager->executeQuery($sentHeadsNs, $qHeads) as $r) {
+            $a = (array)$r;
+            $id = (string)($a['documentId'] ?? '');
+            if ($id === '') continue;
+            $sentIds[$id] = true;
+            $headName = trim((string)($a['officeHeadName'] ?? ''));
+            $recipient = $headName;
+            if (!isset($sentToByDocId[$id])) $sentToByDocId[$id] = [];
+            if ($recipient !== '') $sentToByDocId[$id][$recipient] = true;
+            $sentByName = trim((string)($a['sentByUserName'] ?? ''));
+            if ($sentByName !== '') $sentByAdminByDocId[$id] = $sentByName;
+        }
+    } catch (Exception $e) {}
+
+    $documentsList = array_values(array_filter($documentsList, function ($doc) use ($sentIds) {
+        $status = strtolower(trim((string)($doc['status'] ?? '')));
+        $isSigned = $status === 'signed' || !empty($doc['signedSignature']);
+        $id = (string)($doc['_id'] ?? '');
+        $hasSentFlag = !empty($doc['isSent']);
+        $isSent = $hasSentFlag || ($id !== '' && isset($sentIds[$id]));
+        return $isSigned && $isSent;
+    }));
+
+    foreach ($documentsList as &$doc) {
+        $id = (string)($doc['_id'] ?? '');
+        $labels = [];
+        $docStatusKey = strtolower(trim((string)($doc['status'] ?? '')));
+        $isSignedDoc = ($docStatusKey === 'signed' || !empty($doc['signedSignature']));
+
+        if (!$isSignedDoc) {
+            $doc['sentToDisplay'] = '—';
+            continue;
+        }
+
+        if ($id !== '' && isset($sentToByDocId[$id])) {
+            $labels = array_keys($sentToByDocId[$id]);
+        }
+        if (empty($labels) && $docStatusKey === 'signed') {
+            $sentVia = strtolower(trim((string)($doc['sentVia'] ?? '')));
+            if ($sentVia === 'super_admin') $labels[] = 'Super Admin';
+        }
+        $doc['sentToDisplay'] = empty($labels) ? '—' : implode(', ', $labels);
+        $doc['byDisplay'] = $sentByAdminByDocId[$id] ?? ((string)($doc['signedByUserName'] ?? $doc['createdByName'] ?? '—'));
+    }
+    unset($doc);
 }
 
 // Department heads (offices with assigned head) for Send document modal
@@ -304,35 +1031,83 @@ try {
     $departmentHeadsList = [];
 }
 
-// Merge in documents sent from Super Admin: show them in the same Documents table and mark as "Received"
-$sentToAdminNamespace = $config['database'] . '.sent_to_admin';
-$idsInList = array_column($documentsList, '_id');
-$idsInList = array_flip(array_filter($idsInList));
-$sentFromSuperAdminIds = [];
-try {
-    $query = new MongoDB\Driver\Query([], ['sort' => ['sentAt' => -1], 'limit' => 500]);
-    $cursor = $manager->executeQuery($sentToAdminNamespace, $query);
-    foreach ($cursor as $row) {
-        $arr = (array)$row;
-        $docId = (string)($arr['documentId'] ?? '');
-        if ($docId === '') continue;
-        $sentFromSuperAdminIds[$docId] = true;
-        if (isset($idsInList[$docId])) continue;
-        $idsInList[$docId] = true;
-        $documentsList[] = [
-            '_id'            => $docId,
-            'documentCode'  => $arr['documentCode'] ?? $arr['document_code'] ?? '—',
-            'documentTitle' => $arr['documentTitle'] ?? $arr['document_title'] ?? '—',
-            'fileName'       => $arr['fileName'] ?? $arr['file_name'] ?? 'document.docx',
-            'status'        => 'received',
-        ];
-    }
-} catch (Exception $e) {}
-// Mark documents already in the list that were sent from Super Admin with status "Received"
+// Merge in documents sent from Super Admin (received flow) in active documents view.
+if (!$showArchived && !$showSignedOnly) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $sentToAdminNamespace = $config['database'] . '.sent_to_admin';
+        $idsInList = array_column($documentsList, '_id');
+        $idsInList = array_flip(array_filter($idsInList));
+        $query = new MongoDB\Driver\Query([], ['sort' => ['sentAt' => -1], 'limit' => 500]);
+        $cursor = $manager->executeQuery($sentToAdminNamespace, $query);
+        foreach ($cursor as $row) {
+            $arr = (array)$row;
+            $docId = (string)($arr['documentId'] ?? '');
+            if ($docId === '') continue;
+            $receivedByDocId[$docId] = (string)($arr['sentByUserName'] ?? 'Super Admin');
+            if (isset($idsInList[$docId])) continue;
+            $idsInList[$docId] = true;
+            $documentsList[] = [
+                '_id'            => $docId,
+                'documentCode'   => $arr['documentCode'] ?? $arr['document_code'] ?? '—',
+                'documentTitle'  => $arr['documentTitle'] ?? $arr['document_title'] ?? '—',
+                'fileName'       => $arr['fileName'] ?? $arr['file_name'] ?? 'document.docx',
+                'status'         => 'received',
+                'byDisplay'      => (string)($arr['sentByUserName'] ?? 'Super Admin'),
+            ];
+        }
+    } catch (Exception $e) {}
+}
+
+// For active view, map sent recipients so "By" can show who admin sent to.
+if (!$showArchived && !$showSignedOnly && !empty($documentsList)) {
+    try {
+        $manager = new MongoDB\Driver\Manager($config['uri']);
+        $sentSuperNs = $config['database'] . '.sent_to_super_admin';
+        $sentHeadsNs = $config['database'] . '.sent_to_department_heads';
+        $docIds = array_values(array_filter(array_map(function ($d) {
+            return (string)($d['_id'] ?? '');
+        }, $documentsList)));
+        if (!empty($docIds)) {
+            $qSuper = new MongoDB\Driver\Query(
+                ['documentId' => ['$in' => $docIds]],
+                ['projection' => ['documentId' => 1], 'limit' => 3000]
+            );
+            foreach ($manager->executeQuery($sentSuperNs, $qSuper) as $r) {
+                $a = (array)$r;
+                $id = (string)($a['documentId'] ?? '');
+                if ($id === '') continue;
+                if (!isset($sentToByDocId[$id])) $sentToByDocId[$id] = [];
+                $sentToByDocId[$id]['Super Admin'] = true;
+            }
+
+            $qHeads = new MongoDB\Driver\Query(
+                ['documentId' => ['$in' => $docIds]],
+                ['projection' => ['documentId' => 1, 'officeHeadName' => 1], 'limit' => 3000]
+            );
+            foreach ($manager->executeQuery($sentHeadsNs, $qHeads) as $r) {
+                $a = (array)$r;
+                $id = (string)($a['documentId'] ?? '');
+                if ($id === '') continue;
+                $headName = trim((string)($a['officeHeadName'] ?? ''));
+                if ($headName === '') continue;
+                if (!isset($sentToByDocId[$id])) $sentToByDocId[$id] = [];
+                $sentToByDocId[$id][$headName] = true;
+            }
+        }
+    } catch (Exception $e) {}
+}
+
+// Keep sender display for listed docs based on their own fields.
 foreach ($documentsList as &$doc) {
     $id = (string)($doc['_id'] ?? '');
-    if ($id !== '' && isset($sentFromSuperAdminIds[$id])) {
-        $doc['status'] = 'received';
+    if ($id !== '' && isset($receivedByDocId[$id]) && (strtolower(trim((string)($doc['status'] ?? ''))) === 'received')) {
+        $doc['byDisplay'] = $receivedByDocId[$id];
+    } elseif (!empty($doc['isSent']) && $id !== '' && isset($sentToByDocId[$id])) {
+        $doc['byDisplay'] = implode(', ', array_keys($sentToByDocId[$id]));
+    }
+    if (empty($doc['byDisplay'])) {
+        $doc['byDisplay'] = (string)($doc['createdByName'] ?? $doc['signedByUserName'] ?? '—');
     }
 }
 unset($doc);
@@ -351,7 +1126,7 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin - Documents</title>
+    <title>Admin - <?php echo htmlspecialchars($pageHeading); ?></title>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="admin-dashboard.css">
     <link rel="stylesheet" href="admin-offices.css">
@@ -426,9 +1201,13 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
     .documents-table tbody td { padding: 14px 16px; border-bottom: 1px solid #f1f5f9; color: #334155; font-size: 14px; }
     .documents-empty { text-align: center; height: 200px; color: #64748b; vertical-align: middle; }
     .document-status { display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; text-transform: capitalize; }
+    .document-status-approved { background: #dcfce7; color: #166534; }
+    .document-status-added { background: #dcfce7; color: #166534; }
     .document-status-active { background: #d1fae5; color: #047857; }
     .document-status-archived { background: #f3f4f6; color: #6b7280; }
     .document-status-received { background: #dbeafe; color: #1d4ed8; }
+    .document-status-sent { background: #dbeafe; color: #1d4ed8; }
+    .document-status-signed { background: #ede9fe; color: #5b21b6; }
     .documents-actions-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
     .documents-action-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s; }
     .documents-action-btn svg { width: 16px; height: 16px; flex-shrink: 0; }
@@ -436,6 +1215,8 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
     .documents-action-open:hover { background: #bfdbfe; color: #1d4ed8; }
     .documents-action-archive { background: #fef3c7; color: #b45309; }
     .documents-action-archive:hover { background: #fde68a; color: #b45309; }
+    .documents-action-delete { background: #fee2e2; color: #b91c1c; }
+    .documents-action-delete:hover { background: #fecaca; color: #991b1b; }
     .documents-action-send { background: #d1fae5; color: #047857; }
     .documents-action-send:hover { background: #a7f3d0; color: #047857; }
     .documents-action-send-super { background: #dbeafe; color: #1d4ed8; text-decoration: none; }
@@ -472,17 +1253,33 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
     .send-head-row-content { flex: 1; min-width: 0; }
     .send-head-office { display: block; font-weight: 600; color: #1e293b; font-size: 14px; margin-bottom: 2px; }
     .send-head-name { display: block; color: #64748b; font-size: 13px; }
-    .send-modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 4px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
-    .send-modal-actions .doc-btn { height: 38px; border-radius: 10px; font-size: 14px; font-weight: 600; }
-    .send-modal-actions .doc-btn-save { min-width: 100px; background: #2563eb; color: #fff; }
-    .send-modal-actions .doc-btn-save:hover { background: #1d4ed8; color: #fff; }
-    .send-modal-actions .doc-btn-save:disabled { background: #94a3b8; color: #fff; cursor: not-allowed; }
+    .send-modal-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-top: 6px; padding-top: 16px; border-top: 1px solid #e2e8f0; }
+    .send-modal-actions .documents-action-btn { min-height: 38px; padding: 8px 14px; font-size: 13px; font-weight: 600; border-radius: 10px; text-decoration: none; }
+    .send-modal-actions .documents-action-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .send-modal-actions .send-submit-btn:disabled:hover { background: #fef3c7; color: #b45309; }
     #send-document-modal .documents-empty { font-size: 14px; color: #64748b; }
+    #edit-document-modal .doc-modal-dialog { max-width: 620px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04); }
+    .edit-modal-subtitle { margin: 0; padding: 16px 18px 12px 18px; font-size: 14px; color: #64748b; line-height: 1.5; border-bottom: 1px solid #f1f5f9; }
+    .edit-documents-body { padding: 16px 18px 18px; }
+    .edit-documents-list { display: grid; gap: 10px; max-height: 360px; overflow-y: auto; }
+    .edit-documents-list::-webkit-scrollbar { width: 6px; }
+    .edit-documents-list::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 3px; }
+    .edit-documents-list::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .edit-document-item { width: 100%; border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; padding: 12px 14px; text-align: left; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s, background 0.15s; }
+    .edit-document-item:hover { border-color: #93c5fd; box-shadow: 0 0 0 1px rgba(37,99,235,0.2); background: #f8fafc; }
+    .edit-document-item-title { display: block; font-size: 14px; font-weight: 600; color: #1e293b; margin-bottom: 4px; }
+    .edit-document-item-file { display: block; font-size: 13px; color: #64748b; }
+    .edit-documents-empty { margin: 0; padding: 1rem 0; text-align: center; color: #64748b; font-size: 14px; }
     .doc-modal-dialog-view { max-width: 90%; width: 900px; max-height: 90vh; display: flex; flex-direction: column; }
     .document-view-body { flex: 1; min-height: 0; overflow: auto; padding: 1rem; background: #f8fafc; border-top: 1px solid #e2e8f0; }
     .document-view-container { overflow: auto; max-height: 65vh; padding: 1rem; background: #fff; border-radius: 8px; }
     .document-view-loading, .document-view-error { padding: 2rem; text-align: center; color: #64748b; }
     .document-view-error { color: #dc2626; }
+    .document-view-container { position: relative; }
+    .document-signature-overlay { position: absolute; width: 240px; height: 90px; background: transparent; border: none; border-radius: 0; padding: 0; text-align: center; z-index: 20; cursor: grab; user-select: none; box-shadow: none; }
+    .document-signature-overlay.dragging { cursor: grabbing; filter: drop-shadow(0 6px 12px rgba(15,23,42,0.28)); }
+    .document-signature-overlay img { width: 240px; height: 90px; object-fit: contain; pointer-events: none; display: block; }
+    .document-signature-meta { position: absolute; top: calc(100% + 6px); left: 0; min-width: 240px; background: rgba(248,250,252,0.96); border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px 8px; font-size: 11px; color: #64748b; line-height: 1.35; pointer-events: none; box-shadow: 0 4px 12px rgba(15,23,42,0.14); }
     .doc-modal-footer { flex-shrink: 0; padding: 1rem 1.5rem; border-top: 1px solid #e2e8f0; gap: 10px; display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
     .doc-modal-footer a.documents-action-btn { text-decoration: none; }
     @media (max-width: 980px) { .documents-tools { grid-template-columns: 1fr 1fr; } }
@@ -504,6 +1301,7 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                 <ul>
                     <li><a href="admin_dashboard.php" class="<?php echo $sidebar_active === 'dashboard' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard</a></li>
                     <li><a href="documents.php" class="<?php echo $sidebar_active === 'documents' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>Documents</a></li>
+                    <li><a href="admin_archive.php" class="<?php echo $sidebar_active === 'archived' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archived</a></li>
                     <li><a href="admin_offices.php" class="<?php echo $sidebar_active === 'offices' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18"/><path d="M5 21V7l8-4v18"/><path d="M19 21V11l-6-4"/><path d="M9 9v.01"/><path d="M9 12v.01"/><path d="M9 15v.01"/><path d="M9 18v.01"/></svg>Departments</a></li>
                     <li><a href="document_history.php" class="<?php echo $sidebar_active === 'document-history' ? 'active' : ''; ?>"><svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>Document History</a></li>
                 </ul>
@@ -532,8 +1330,8 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                 <div class="dashboard-header">
                     <div class="dept-page-header" style="flex: 1; margin-bottom: 0;">
                         <div>
-                            <h1 class="dept-page-title">Documents</h1>
-                            <p class="dept-page-subtitle">Create, track, and manage municipal documents across all departments</p>
+                            <h1 class="dept-page-title"><?php echo htmlspecialchars($pageHeading); ?></h1>
+                            <p class="dept-page-subtitle"><?php echo htmlspecialchars($pageSubtitle); ?></p>
                         </div>
                     </div>
                     <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
@@ -552,11 +1350,12 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
 
             <div class="content-body">
                 <section class="documents-card">
-                    <h2 class="documents-title">Documents</h2>
+                    <h2 class="documents-title"><?php echo htmlspecialchars($cardHeading); ?></h2>
                     <div class="documents-tools">
-                        <input type="text" id="search-documents" placeholder="Search by code or title" aria-label="Search by code or title">
+                        <input type="text" id="search-documents" placeholder="<?php echo htmlspecialchars($searchPlaceholder); ?>" aria-label="<?php echo htmlspecialchars($searchPlaceholder); ?>">
                         <input type="date" id="documents-date-from" aria-label="From date">
                         <input type="date" id="documents-date-to" aria-label="To date">
+                        <?php if (!$isArchiveView): ?>
                         <button type="button" class="documents-btn" id="open-add-document-modal">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
                             Add Document
@@ -565,6 +1364,7 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
                             Edit
                         </button>
+                        <?php endif; ?>
                     </div>
 
                     <div class="documents-table-frame">
@@ -576,13 +1376,15 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                                     <th>DOCUMENT TITLE</th>
                                     <th>DOCX FILE</th>
                                     <th>STATUS</th>
+                                    <?php if (!$showSignedOnly): ?><th>BY</th><?php endif; ?>
+                                    <?php if ($showSignedOnly): ?><th>SENT TO</th><?php endif; ?>
                                     <th>ACTION</th>
                                 </tr>
                             </thead>
                             <tbody id="documents-table-body">
                                 <?php if (empty($documentsList)): ?>
                                 <tr>
-                                    <td colspan="6" class="documents-empty" id="no-documents-row">No documents yet.</td>
+                                    <td colspan="<?php echo $showSignedOnly ? '7' : '7'; ?>" class="documents-empty" id="no-documents-row"><?php echo htmlspecialchars($emptyRowText); ?></td>
                                 </tr>
                                 <?php else: ?>
                                 <?php foreach ($documentsList as $idx => $doc): ?>
@@ -591,7 +1393,25 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                                     $docCode = htmlspecialchars($doc['documentCode'] ?? $doc['document_code'] ?? '—');
                                     $docTitle = htmlspecialchars($doc['documentTitle'] ?? $doc['document_title'] ?? '—');
                                     $docFileName = htmlspecialchars($doc['fileName'] ?? $doc['file_name'] ?? '—');
-                                    $docStatus = isset($doc['status']) ? ucfirst(strtolower($doc['status'])) : 'Active';
+                                    $rawStatus = strtolower(trim((string)($doc['status'] ?? '')));
+                                    $hasSigned = ($rawStatus === 'signed' || !empty($doc['signedSignature']));
+                                    $isSentDoc = !empty($doc['isSent']);
+                                    $docStatus = 'Added';
+                                    if ($showSignedOnly && $hasSigned && $isSentDoc) {
+                                        $docStatus = 'Archived';
+                                    } elseif ($hasSigned) {
+                                        $docStatus = 'Signed';
+                                    } elseif ($rawStatus === 'received') {
+                                        $docStatus = 'Received';
+                                    } elseif ($rawStatus === 'sent') {
+                                        $docStatus = 'Sent';
+                                    } elseif ($rawStatus === 'archived') {
+                                        $docStatus = 'Archived';
+                                    }
+                                    $byDisplay = (string)($doc['byDisplay'] ?? '—');
+                                    if ($docStatus === 'Added') {
+                                        $byDisplay = trim((string)($doc['createdByName'] ?? '')) !== '' ? (string)$doc['createdByName'] : 'Admin';
+                                    }
                                 ?>
                                 <tr data-document-row data-document-id="<?php echo htmlspecialchars($docId); ?>">
                                     <td><?php echo (int)($idx + 1); ?></td>
@@ -599,9 +1419,12 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                                     <td><?php echo $docTitle; ?></td>
                                     <td><a href="documents.php?view=<?php echo urlencode($docId); ?>" class="doc-file-link document-view-trigger" data-doc-id="<?php echo htmlspecialchars($docId); ?>" data-doc-name="<?php echo htmlspecialchars($docFileName); ?>"><?php echo $docFileName; ?></a></td>
                                     <td><span class="document-status document-status-<?php echo strtolower(htmlspecialchars($docStatus)); ?>"><?php echo htmlspecialchars($docStatus); ?></span></td>
+                                    <?php if (!$showSignedOnly): ?><td><?php echo htmlspecialchars(dmsFormatActorName($byDisplay)); ?></td><?php endif; ?>
+                                    <?php if ($showSignedOnly): ?><td><?php echo htmlspecialchars((string)($doc['sentToDisplay'] ?? '—')); ?></td><?php endif; ?>
                                     <td>
                                         <div class="documents-actions-row">
                                             <a href="documents.php?view=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-open document-view-trigger" data-doc-id="<?php echo htmlspecialchars($docId); ?>" data-doc-name="<?php echo htmlspecialchars($docFileName); ?>" title="View document"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>View</a>
+                                            <?php if (!$isArchiveView): ?>
                                             <div class="documents-send-wrap">
                                                 <button type="button" class="documents-action-btn documents-action-send documents-send-trigger" data-document-id="<?php echo htmlspecialchars($docId); ?>" title="Send" aria-haspopup="true" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send</button>
                                                 <div class="documents-send-dropdown" role="menu" aria-label="Send options">
@@ -609,7 +1432,7 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                                                     <button type="button" class="documents-send-dropdown-item" data-send-action="heads" data-document-id="<?php echo htmlspecialchars($docId); ?>"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Send to Heads</button>
                                                 </div>
                                             </div>
-                                            <a href="documents.php?archive=<?php echo urlencode($docId); ?>" class="documents-action-btn documents-action-archive" title="Archive document" onclick="return confirm('Archive this document?');"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><path d="M1 3h22v5H1z"/><line x1="10" y1="12" x2="14" y2="12"/></svg>Archive</a>
+                                            <?php endif; ?>
                                         </div>
                                     </td>
                                 </tr>
@@ -689,10 +1512,41 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                     <?php endif; ?>
                 </div>
                 <div class="send-modal-actions">
-                    <button type="button" class="doc-btn doc-btn-cancel" data-close-send-document>Cancel</button>
-                    <button type="submit" class="doc-btn doc-btn-save" id="send-submit-btn" <?php if (empty($departmentHeadsList)): ?>disabled<?php endif; ?>>Send</button>
+                    <button type="button" class="documents-action-btn documents-action-open" data-close-send-document><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Cancel</button>
+                    <button type="submit" class="documents-action-btn documents-action-archive send-submit-btn" id="send-submit-btn" <?php if (empty($departmentHeadsList)): ?>disabled<?php endif; ?>><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>Send</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <div class="doc-modal" id="edit-document-modal" hidden>
+        <button type="button" class="doc-modal-overlay" data-close-edit-document aria-label="Close"></button>
+        <div class="doc-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="edit-document-title">
+            <div class="doc-modal-header">
+                <h2 id="edit-document-title">Edit Document</h2>
+                <button type="button" class="doc-modal-close" data-close-edit-document aria-label="Close">&times;</button>
+            </div>
+            <p class="edit-modal-subtitle">Choose a document to open it in the viewer. You can then update your profile signature before approving/signing.</p>
+            <div class="edit-documents-body">
+                <div class="edit-documents-list" id="edit-documents-list">
+                    <?php if (empty($documentsList)): ?>
+                    <p class="edit-documents-empty">No documents available to edit.</p>
+                    <?php else: ?>
+                    <?php foreach ($documentsList as $doc): ?>
+                    <?php
+                        $editDocId = $doc['_id'] ?? '';
+                        $editDocCode = $doc['documentCode'] ?? $doc['document_code'] ?? '—';
+                        $editDocTitle = $doc['documentTitle'] ?? $doc['document_title'] ?? 'Untitled';
+                        $editDocFile = $doc['fileName'] ?? $doc['file_name'] ?? 'document.docx';
+                    ?>
+                    <button type="button" class="edit-document-item" data-edit-doc-id="<?php echo htmlspecialchars($editDocId); ?>" data-edit-doc-name="<?php echo htmlspecialchars($editDocFile); ?>">
+                        <span class="edit-document-item-title"><?php echo htmlspecialchars($editDocCode . ' — ' . $editDocTitle); ?></span>
+                        <span class="edit-document-item-file"><?php echo htmlspecialchars($editDocFile); ?></span>
+                    </button>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -710,6 +1564,9 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
             </div>
             <div class="doc-modal-footer doc-modal-actions">
                 <a id="document-view-download-link" href="#" class="documents-action-btn documents-action-open" target="_blank" rel="noopener" download style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download</a>
+                <button type="button" id="document-sign-btn" class="documents-action-btn documents-action-send" title="Insert your profile signature and save" style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>Insert Signature</button>
+                <button type="button" id="document-sign-save-btn" class="documents-action-btn documents-action-send" title="Save signature location" style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>Save</button>
+                <button type="button" id="document-sign-delete-btn" class="documents-action-btn documents-action-delete" title="Delete signature" style="display:none;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>Delete Signature</button>
                 <button type="button" class="documents-action-btn documents-action-open" data-close-document-view><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>Close</button>
             </div>
         </div>
@@ -743,6 +1600,7 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
         var errorEl = document.getElementById('document-form-error');
         var documentsTableBody = document.getElementById('documents-table-body');
         var editBtn = document.getElementById('edit-document-btn');
+        var editDocumentModal = document.getElementById('edit-document-modal');
 
         function setFormError(message) {
             if (!errorEl) return;
@@ -783,12 +1641,42 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                 closeAddDocumentModal();
             }
         });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && editDocumentModal && !editDocumentModal.hidden) {
+                closeEditDocumentModal();
+            }
+        });
+
+        function openEditDocumentModal() {
+            if (!editDocumentModal) return;
+            editDocumentModal.hidden = false;
+            document.body.classList.add('modal-open');
+        }
+
+        function closeEditDocumentModal() {
+            if (!editDocumentModal) return;
+            editDocumentModal.hidden = true;
+            document.body.classList.remove('modal-open');
+        }
 
         if (editBtn) {
             editBtn.addEventListener('click', function() {
-                alert('Select a document row to edit. (Edit function can be added next.)');
+                openEditDocumentModal();
             });
         }
+
+        document.querySelectorAll('[data-close-edit-document]').forEach(function(btn) {
+            btn.addEventListener('click', closeEditDocumentModal);
+        });
+
+        document.querySelectorAll('.edit-document-item').forEach(function(item) {
+            item.addEventListener('click', function() {
+                var docId = this.getAttribute('data-edit-doc-id') || '';
+                var docName = this.getAttribute('data-edit-doc-name') || 'document.docx';
+                closeEditDocumentModal();
+                if (docId) openDocumentViewModal(docId, docName, true);
+            });
+        });
 
         // Open modal on load when there was an add error (after POST redirect)
         if (addModal && document.body.getAttribute('data-add-error') === '1') {
@@ -946,19 +1834,198 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
         var documentViewLoading = document.getElementById('document-view-loading');
         var documentViewError = document.getElementById('document-view-error');
         var documentViewDownloadLink = document.getElementById('document-view-download-link');
+        var documentSignBtn = document.getElementById('document-sign-btn');
+        var documentSignSaveBtn = document.getElementById('document-sign-save-btn');
+        var documentSignDeleteBtn = document.getElementById('document-sign-delete-btn');
+        var currentUserSignature = <?php echo json_encode((string)$currentUserSignature); ?>;
+        var currentViewDocId = '';
+        var currentViewDocName = '';
+        var currentViewFromEditFlow = false;
+        var currentSignaturePosX = 0.72;
+        var currentSignaturePosY = 0.06;
+        var signatureOverlayEl = null;
 
-        function openDocumentViewModal(docId, docName) {
+        function showToast(message, bgColor) {
+            var toast = document.createElement('div');
+            toast.setAttribute('role', 'status');
+            toast.textContent = message;
+            toast.style.cssText = 'position:fixed;bottom:1.5rem;right:1.5rem;z-index:1600;padding:0.75rem 1.25rem;background:' + (bgColor || '#22c55e') + ';color:#fff;border-radius:10px;font-size:14px;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,0.15);';
+            document.body.appendChild(toast);
+            setTimeout(function() { toast.remove(); }, 3500);
+        }
+
+        function removeSignatureOverlay() {
+            if (signatureOverlayEl && signatureOverlayEl.parentNode) {
+                signatureOverlayEl.parentNode.removeChild(signatureOverlayEl);
+            }
+            signatureOverlayEl = null;
+        }
+
+        function clamp(n, min, max) {
+            return Math.max(min, Math.min(max, n));
+        }
+
+        function getPrimaryRenderSurface() {
+            if (!documentViewContainer) return null;
+            var selectors = ['.docx-wrapper', '.docx', '.docx-page', 'section'];
+            for (var i = 0; i < selectors.length; i += 1) {
+                var el = documentViewContainer.querySelector(selectors[i]);
+                if (el && el.clientWidth > 200 && el.clientHeight > 200) return el;
+            }
+            var fallback = documentViewContainer.firstElementChild;
+            return fallback || documentViewContainer;
+        }
+
+        function getSignatureBounds(el) {
+            if (!documentViewContainer || !el) return null;
+            var surface = getPrimaryRenderSurface();
+            if (!surface) surface = documentViewContainer;
+            var containerRect = documentViewContainer.getBoundingClientRect();
+            var surfaceRect = surface.getBoundingClientRect();
+            var cs = window.getComputedStyle(surface);
+            var padLeft = parseFloat(cs.paddingLeft || '0') || 0;
+            var padRight = parseFloat(cs.paddingRight || '0') || 0;
+            var padTop = parseFloat(cs.paddingTop || '0') || 0;
+            var padBottom = parseFloat(cs.paddingBottom || '0') || 0;
+            var contentWidth = Math.max(0, surfaceRect.width - padLeft - padRight);
+            var contentHeight = Math.max(0, surfaceRect.height - padTop - padBottom);
+            var minLeft = (surfaceRect.left - containerRect.left) + documentViewContainer.scrollLeft + padLeft;
+            var minTop = (surfaceRect.top - containerRect.top) + documentViewContainer.scrollTop + padTop;
+            var maxLeft = minLeft + Math.max(0, contentWidth - el.offsetWidth);
+            var maxTop = minTop + Math.max(0, contentHeight - el.offsetHeight);
+            return {
+                minLeft: minLeft,
+                minTop: minTop,
+                maxLeft: maxLeft,
+                maxTop: maxTop
+            };
+        }
+
+        function applySignaturePosition(el, posX, posY) {
+            if (!documentViewContainer || !el) return;
+            var bounds = getSignatureBounds(el);
+            if (!bounds) return;
+            var spanX = Math.max(0, bounds.maxLeft - bounds.minLeft);
+            var spanY = Math.max(0, bounds.maxTop - bounds.minTop);
+            var left = bounds.minLeft + (clamp(posX, 0, 1) * spanX);
+            var top = bounds.minTop + (clamp(posY, 0, 1) * spanY);
+            el.style.left = left + 'px';
+            el.style.top = top + 'px';
+            currentSignaturePosX = spanX > 0 ? ((left - bounds.minLeft) / spanX) : 0;
+            currentSignaturePosY = spanY > 0 ? ((top - bounds.minTop) / spanY) : 0;
+        }
+
+        function buildSignatureOverlay(signatureData, signedByName, signedAtText, posX, posY, draggable) {
+            if (!documentViewContainer || !signatureData) return;
+            removeSignatureOverlay();
+            var overlay = document.createElement('div');
+            overlay.className = 'document-signature-overlay';
+            overlay.style.cursor = draggable ? 'grab' : 'default';
+            var signedBy = signedByName || 'User';
+            var signedAt = signedAtText ? ('Signed at: ' + signedAtText) : '';
+            overlay.innerHTML =
+                '<img src="' + signatureData + '" alt="Document signature">' +
+                '<div class="document-signature-meta">' +
+                'Signed by: ' + signedBy + (signedAt ? '<br>' + signedAt : '') +
+                '</div>';
+            documentViewContainer.appendChild(overlay);
+            signatureOverlayEl = overlay;
+            requestAnimationFrame(function() {
+                applySignaturePosition(overlay, posX, posY);
+            });
+
+            if (!draggable) return;
+
+            var dragging = false;
+            var startX = 0, startY = 0, startLeft = 0, startTop = 0;
+            function onMove(e) {
+                if (!dragging || !signatureOverlayEl) return;
+                var dx = e.clientX - startX;
+                var dy = e.clientY - startY;
+                var bounds = getSignatureBounds(signatureOverlayEl);
+                if (!bounds) return;
+                var spanX = Math.max(0, bounds.maxLeft - bounds.minLeft);
+                var spanY = Math.max(0, bounds.maxTop - bounds.minTop);
+                var nextLeft = clamp(startLeft + dx, bounds.minLeft, bounds.maxLeft);
+                var nextTop = clamp(startTop + dy, bounds.minTop, bounds.maxTop);
+                signatureOverlayEl.style.left = nextLeft + 'px';
+                signatureOverlayEl.style.top = nextTop + 'px';
+                currentSignaturePosX = spanX > 0 ? ((nextLeft - bounds.minLeft) / spanX) : 0;
+                currentSignaturePosY = spanY > 0 ? ((nextTop - bounds.minTop) / spanY) : 0;
+            }
+            function onUp() {
+                dragging = false;
+                if (signatureOverlayEl) signatureOverlayEl.classList.remove('dragging');
+                window.removeEventListener('mousemove', onMove);
+                window.removeEventListener('mouseup', onUp);
+            }
+            overlay.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                dragging = true;
+                overlay.classList.add('dragging');
+                startX = e.clientX;
+                startY = e.clientY;
+                startLeft = parseFloat(overlay.style.left || '0');
+                startTop = parseFloat(overlay.style.top || '0');
+                window.addEventListener('mousemove', onMove);
+                window.addEventListener('mouseup', onUp);
+            });
+        }
+
+        function loadSignatureMeta(docId) {
+            if (!currentViewFromEditFlow) {
+                removeSignatureOverlay();
+                if (documentSignSaveBtn) documentSignSaveBtn.style.display = 'none';
+                if (documentSignDeleteBtn) documentSignDeleteBtn.style.display = 'none';
+                return Promise.resolve();
+            }
+            return fetch('documents.php?signature_meta=' + encodeURIComponent(docId))
+                .then(function(res) { return res.json(); })
+                .then(function(meta) {
+                    if (meta && meta.success && meta.signedSignature) {
+                        buildSignatureOverlay(
+                            meta.signedSignature,
+                            meta.signedByUserName,
+                            meta.signedAtText,
+                            typeof meta.signedPosX === 'number' ? meta.signedPosX : 0.72,
+                            typeof meta.signedPosY === 'number' ? meta.signedPosY : 0.06,
+                            currentViewFromEditFlow
+                        );
+                        if (documentSignSaveBtn) documentSignSaveBtn.style.display = currentViewFromEditFlow ? 'inline-flex' : 'none';
+                        if (documentSignDeleteBtn) documentSignDeleteBtn.style.display = currentViewFromEditFlow ? 'inline-flex' : 'none';
+                    } else {
+                        if (documentSignSaveBtn) documentSignSaveBtn.style.display = 'none';
+                        if (documentSignDeleteBtn) documentSignDeleteBtn.style.display = 'none';
+                    }
+                })
+                .catch(function() {});
+        }
+
+        function openDocumentViewModal(docId, docName, fromEditFlow) {
             if (!documentViewModal || !documentViewContainer) return;
+            currentViewDocId = docId;
+            currentViewDocName = docName || 'document.docx';
+            currentViewFromEditFlow = !!fromEditFlow;
             documentViewModal.hidden = false;
             document.body.classList.add('modal-open');
-            documentViewTitle.textContent = docName || 'Document';
+            documentViewTitle.textContent = currentViewDocName;
             documentViewLoading.style.display = 'block';
             documentViewContainer.style.display = 'none';
             documentViewContainer.innerHTML = '';
+            removeSignatureOverlay();
             documentViewError.style.display = 'none';
             if (documentViewDownloadLink) {
                 documentViewDownloadLink.href = 'documents.php?download=' + encodeURIComponent(docId);
-                documentViewDownloadLink.style.display = 'inline-flex';
+                documentViewDownloadLink.style.display = currentViewFromEditFlow ? 'none' : 'inline-flex';
+            }
+            if (documentSignBtn) {
+                documentSignBtn.style.display = currentViewFromEditFlow ? 'inline-flex' : 'none';
+            }
+            if (documentSignSaveBtn) {
+                documentSignSaveBtn.style.display = 'none';
+            }
+            if (documentSignDeleteBtn) {
+                documentSignDeleteBtn.style.display = 'none';
             }
 
             var viewUrl = 'documents.php?view=' + encodeURIComponent(docId);
@@ -976,6 +2043,7 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                     if (typeof docx !== 'undefined' && docx.renderAsync) {
                         return docx.renderAsync(blob, documentViewContainer).then(function() {
                             documentViewContainer.style.display = 'block';
+                            return loadSignatureMeta(docId);
                         }).catch(function(err) {
                             documentViewError.textContent = 'Could not render document.';
                             documentViewError.style.display = 'block';
@@ -995,13 +2063,126 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
             if (!documentViewModal) return;
             documentViewModal.hidden = true;
             document.body.classList.remove('modal-open');
+            currentViewDocId = '';
+            currentViewDocName = '';
+            currentViewFromEditFlow = false;
             if (documentViewContainer) {
                 documentViewContainer.innerHTML = '';
                 documentViewContainer.style.display = 'none';
             }
+            removeSignatureOverlay();
             if (documentViewLoading) documentViewLoading.style.display = 'block';
             if (documentViewError) documentViewError.style.display = 'none';
             if (documentViewDownloadLink) documentViewDownloadLink.style.display = 'none';
+            if (documentSignBtn) documentSignBtn.style.display = 'none';
+            if (documentSignSaveBtn) documentSignSaveBtn.style.display = 'none';
+            if (documentSignDeleteBtn) documentSignDeleteBtn.style.display = 'none';
+        }
+
+        if (documentSignBtn) {
+            var signBtnDefaultHtml = documentSignBtn.innerHTML;
+            documentSignBtn.addEventListener('click', function() {
+                if (!currentViewDocId) return;
+                if (!currentUserSignature) {
+                    alert('No saved profile signature found. Please set your signature first in Settings.');
+                    return;
+                }
+                documentSignBtn.disabled = true;
+                documentSignBtn.textContent = 'Saving...';
+                var payload = new URLSearchParams();
+                payload.set('action', 'sign_document');
+                payload.set('document_id', currentViewDocId);
+                fetch('documents.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                    body: payload.toString()
+                })
+                .then(function(res) { return res.json(); })
+                .then(function(resp) {
+                    if (!resp || !resp.success) {
+                        throw new Error((resp && resp.message) || 'Failed to save signature.');
+                    }
+                    buildSignatureOverlay(
+                        resp.signedSignature,
+                        resp.signedByUserName,
+                        resp.signedAtText,
+                        typeof resp.signedPosX === 'number' ? resp.signedPosX : 0.72,
+                        typeof resp.signedPosY === 'number' ? resp.signedPosY : 0.06,
+                        currentViewFromEditFlow
+                    );
+                    if (documentSignSaveBtn) documentSignSaveBtn.style.display = currentViewFromEditFlow ? 'inline-flex' : 'none';
+                    if (documentSignDeleteBtn) documentSignDeleteBtn.style.display = currentViewFromEditFlow ? 'inline-flex' : 'none';
+                    showToast(resp.message || 'Signature inserted.');
+                })
+                .catch(function(err) {
+                    alert(err.message || 'Could not save signature.');
+                })
+                .finally(function() {
+                    documentSignBtn.disabled = false;
+                    documentSignBtn.innerHTML = signBtnDefaultHtml;
+                });
+            });
+        }
+
+        if (documentSignSaveBtn) {
+            documentSignSaveBtn.addEventListener('click', function() {
+                if (!currentViewDocId || !signatureOverlayEl) return;
+                documentSignSaveBtn.disabled = true;
+                var payload = new URLSearchParams();
+                payload.set('action', 'save_signature_position');
+                payload.set('document_id', currentViewDocId);
+                payload.set('pos_x', String(currentSignaturePosX));
+                payload.set('pos_y', String(currentSignaturePosY));
+                fetch('documents.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                    body: payload.toString()
+                })
+                .then(function(res) { return res.json(); })
+                .then(function(resp) {
+                    if (!resp || !resp.success) throw new Error((resp && resp.message) || 'Failed to save.');
+                    showToast(resp.message || 'Saved signature position.');
+                })
+                .catch(function(err) {
+                    alert(err.message || 'Could not save signature position.');
+                })
+                .finally(function() {
+                    documentSignSaveBtn.disabled = false;
+                });
+            });
+        }
+
+        if (documentSignDeleteBtn) {
+            documentSignDeleteBtn.addEventListener('click', function() {
+                if (!currentViewDocId) return;
+                if (!confirm('Delete signature from this document?')) return;
+                documentSignDeleteBtn.disabled = true;
+                var payload = new URLSearchParams();
+                payload.set('action', 'delete_signature');
+                payload.set('document_id', currentViewDocId);
+                fetch('documents.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+                    body: payload.toString()
+                })
+                .then(function(res) { return res.json(); })
+                .then(function(resp) {
+                    if (!resp || !resp.success) throw new Error((resp && resp.message) || 'Failed to delete signature.');
+                    removeSignatureOverlay();
+                    if (documentSignSaveBtn) documentSignSaveBtn.style.display = 'none';
+                    if (documentSignDeleteBtn) documentSignDeleteBtn.style.display = 'none';
+                    showToast(resp.message || 'Signature deleted.');
+                    if (currentViewDocId) {
+                        openDocumentViewModal(currentViewDocId, currentViewDocName, currentViewFromEditFlow);
+                    }
+                })
+                .catch(function(err) {
+                    alert(err.message || 'Could not delete signature.');
+                })
+                .finally(function() {
+                    documentSignDeleteBtn.disabled = false;
+                });
+            });
         }
 
         document.querySelectorAll('.document-view-trigger').forEach(function(el) {
@@ -1009,7 +2190,7 @@ if (isset($_GET['add_error']) && isset($_SESSION['documents_add_error'])) {
                 e.preventDefault();
                 var docId = el.getAttribute('data-doc-id');
                 var docName = el.getAttribute('data-doc-name') || 'document.docx';
-                if (docId) openDocumentViewModal(docId, docName);
+                if (docId) openDocumentViewModal(docId, docName, false);
             });
         });
 
